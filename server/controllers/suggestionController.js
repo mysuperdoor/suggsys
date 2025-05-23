@@ -8,7 +8,7 @@ const { validateSuggestion } = require('../utils/validation');
 const { Review, REVIEW_LEVELS, REVIEW_RESULTS } = require('../models/Review');
 const { notifyReviewers } = require('../utils/notificationUtils');
 // 导入前端定义的常量
-const { IMPLEMENTATION_STATUS } = require('../../client/src/constants/suggestions');
+const { IMPLEMENTATION_STATUS, SUGGESTION_TYPES } = require('../../client/src/constants/suggestions'); // Added SUGGESTION_TYPES
 const Logger = require('../utils/logger');
 
 const logger = new Logger('SuggestionController');
@@ -745,63 +745,132 @@ exports.getPendingReviewSuggestions = async (req, res) => {
 // 创建新建议
 exports.createSuggestion = async (req, res) => {
   try {
+    logger.debug('建议提交 - 请求体:', req.body);
+    logger.debug('建议提交 - 上传文件:', req.files ? req.files.length : 0);
+
     // 检查用户权限 - 运行科和安全科管理人员不允许提交建议
+    // This check was present in the old createSuggestion, but not in the route handler.
+    // For equivalence with the *original route handler*, this specific check should be removed.
+    // However, if this is a desired business rule, it should be consistently applied.
+    // For this refactoring task, I will mirror the original route handler's logic.
+    /*
     if (req.user && (req.user.role === '运行科管理人员' || req.user.role === '安全科管理人员')) {
+      // If files were uploaded, they should be cleaned up
+      if (req.files && req.files.length > 0) {
+        req.files.forEach(file => {
+          fs.unlink(file.path, err => {
+            if (err) logger.error('删除文件失败 (权限不足):', err);
+          });
+        });
+      }
       return res.status(403).json({
-        success: false,
+        success: false, // Assuming a consistent error response structure
         message: '运行科和安全科管理人员暂时无法提交建议'
       });
     }
-    
-    const { title, type, content, expectedBenefit } = req.body;
-    
-    // 验证必填字段
-    if (!title || !type || !content) {
-      return res.status(400).json({
-        success: false,
-        message: '标题、类型和内容为必填项'
-      });
+    */
+
+    // 确保上传目录存在 (Multer usually handles this, but good for robustness)
+    const uploadDir = path.join(__dirname, '../uploads');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+      logger.info('创建上传目录:', uploadDir);
     }
-    
-    // 创建建议对象
+
+    // 手动验证请求数据 (mirroring the logic from the route)
+    const errors = [];
+    if (!req.body.title) {
+      errors.push({ msg: '标题不能为空' });
+    } else if (req.body.title.length > 100) {
+      errors.push({ msg: '标题不能超过100个字符' });
+    }
+    if (!req.body.type) {
+      errors.push({ msg: '请选择有效的建议类型' });
+    } else if (!Object.keys(SUGGESTION_TYPES).includes(req.body.type)) {
+      errors.push({ msg: '建议类型无效' });
+    }
+    if (!req.body.content) {
+      errors.push({ msg: '内容不能为空' });
+    } else if (req.body.content.length < 20) {
+      errors.push({ msg: '内容不能少于20个字符' });
+    }
+    if (!req.body.expectedBenefit) {
+      errors.push({ msg: '预期效果不能为空' }); // Original message was "预期效果不能为空"
+    }
+
+    if (errors.length > 0) {
+      if (req.files && req.files.length > 0) {
+        req.files.forEach(file => {
+          fs.unlink(file.path, err => {
+            if (err) logger.error('删除文件失败 (验证错误):', err);
+          });
+        });
+      }
+      // Original route returned: { message: errors[0].msg, errors: errors }
+      // For consistency with other error responses, using 'message' for the primary error.
+      return res.status(400).json({ message: errors[0].msg, errors: errors });
+    }
+
+    const { title, type, content, expectedBenefit } = req.body;
+
+    let attachments = [];
+    if (req.files && req.files.length > 0) {
+      attachments = req.files.map(file => {
+        // Ensure originalname is UTF-8 encoded
+        const safeOriginalname = Buffer.from(file.originalname, 'latin1').toString('utf8');
+        return {
+          filename: file.filename,
+          originalname: safeOriginalname,
+          mimetype: file.mimetype,
+          size: file.size
+          // path: file.path, // Path is not stored in schema based on previous analysis
+        };
+      });
+      logger.debug('处理附件:', attachments);
+    }
+
     const suggestion = new Suggestion({
       title,
       type,
       content,
       expectedBenefit,
-      submitter: req.user._id,
-      team: req.user.team
+      submitter: req.user.id, // Assuming auth middleware provides req.user.id
+      team: req.user.team,   // Assuming auth middleware provides req.user.team
+      attachments: attachments
     });
-    
-    // 处理附件上传
-    if (req.files && req.files.length > 0) {
-      suggestion.attachments = req.files.map(file => ({
-        filename: file.filename,
-        path: file.path,
-        originalname: file.originalname,
-        mimetype: file.mimetype,
-        size: file.size
-      }));
-    }
-    
-    // 保存建议
+
+    logger.debug('准备保存建议:', JSON.stringify(suggestion, null, 2));
     await suggestion.save();
+    logger.info('建议保存成功，ID:', suggestion._id);
+
+    // Populate submitter info for the response
+    await suggestion.populate('submitter', 'name team');
     
-    // 返回成功响应
-    res.status(201).json({
-      success: true,
-      message: '建议提交成功',
-      suggestion
+    logger.debug('返回建议数据:', JSON.stringify(suggestion, null, 2));
+    // Original route returned: { message: '建议提交成功', suggestion }
+    res.status(201).json({ 
+      message: '建议提交成功', 
+      suggestion 
     });
+
   } catch (error) {
-    logger.error('创建建议失败:', error);
-    res.status(500).json({
-      success: false,
-      message: '服务器错误，建议提交失败',
-      error: error.message
+    // If save fails and files were uploaded, attempt to delete them
+    if (req.files && req.files.length > 0) {
+      req.files.forEach(file => {
+        fs.unlink(file.path, err => {
+          if (err) logger.error('删除文件失败 (保存错误):', err);
+        });
+      });
+    }
+    logger.error('提交建议失败 (Controller):', error);
+    // Original route returned: { message: '提交建议失败', error: error.message }
+    res.status(500).json({ 
+      message: '提交建议失败', 
+      error: error.message 
     });
   }
 };
+
 
 // 更新建议
 exports.updateSuggestion = async (req, res) => {

@@ -6,13 +6,19 @@ const path = require('path');
 const fs = require('fs');
 const auth = require('../middleware/auth');
 const { Suggestion, SUGGESTION_STATUS } = require('../models/Suggestion');
-const { User, ROLES } = require('../models/User');
+const { User, ROLES } = require('../models/User'); // ROLES is already imported
 const { SUGGESTION_TYPES, IMPLEMENTATION_STATUS, SUGGESTION_STATUS: SUGGESTION_STATUS_FROM_CONST } = require('../../client/src/constants/suggestions');
 const suggestionController = require('../controllers/suggestionController');
 const reviewController = require('../controllers/reviewController');
-const { checkRole } = require('../middleware/roleMiddleware');
+const { checkRole } = require('../middleware/roleMiddleware'); // checkRole is imported
 const { validateSuggestion } = require('../middleware/validationMiddleware');
 const uploadMiddleware = require('../middleware/uploadMiddleware');
+// Import specific role checkers from admin.js
+const { 
+  checkShiftSupervisorRole, 
+  checkAnyAdminRole, 
+  checkDepartmentManagerRole 
+} = require('../middleware/admin');
 
 // 配置文件上传
 const storage = multer.diskStorage({
@@ -36,41 +42,10 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 } // 10MB
 });
 
-// 检查用户权限的中间件
-const checkTeamMemberRole = (req, res, next) => {
-  if (req.user.role !== '班组成员') {
-    return res.status(403).json({ msg: '没有权限，需要班组成员权限' });
-  }
-  next();
-};
-
-const checkSupervisorRole = (req, res, next) => {
-  if (req.user.role !== '值班主任' && 
-      req.user.role !== '安全科管理人员' && 
-      req.user.role !== '运行科管理人员' && 
-      req.user.role !== '部门经理') {
-    return res.status(403).json({ msg: '没有权限，需要值班主任或更高级别权限' });
-  }
-  next();
-};
-
-const checkAdminRole = (req, res, next) => {
-  if (req.user.role !== '安全科管理人员' && 
-      req.user.role !== '运行科管理人员' && 
-      req.user.role !== '部门经理') {
-    return res.status(403).json({ msg: '没有权限，需要管理人员权限' });
-  }
-  next();
-};
-
-const checkManagerRole = (req, res, next) => {
-  if (req.user.role !== '部门经理') {
-    return res.status(403).json({ msg: '没有权限，需要部门经理权限' });
-  }
-  next();
-};
+// Custom role checkers (checkTeamMemberRole, checkSupervisorRole, checkAdminRole, checkManagerRole) will be removed from here.
 
 // 检查评分权限中间件
+// This middleware (checkScorePermission) is complex and context-specific, so it remains.
 const checkScorePermission = async (req, res, next) => {
   try {
     // 部门经理有权限评分所有建议
@@ -135,121 +110,16 @@ router.get('/create', auth, async (req, res) => {
 // @route   POST api/suggestions
 // @desc    创建新建议
 // @access  Private
-router.post('/', auth, upload.array('files', 5), validateSuggestion, async (req, res) => {
-  try {
-    console.log('建议提交 - 请求体:', req.body);
-    console.log('建议提交 - 上传文件:', req.files ? req.files.length : 0);
-    
-    // 确保上传目录存在
-    const uploadDir = path.join(__dirname, '../uploads');
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-      console.log('创建上传目录:', uploadDir);
-    }
-    
-    // 手动验证请求数据
-    const errors = [];
-    
-    if (!req.body.title) {
-      errors.push({ msg: '标题不能为空' });
-    } else if (req.body.title.length > 100) {
-      errors.push({ msg: '标题不能超过100个字符' });
-    }
-    
-    if (!req.body.type) {
-      errors.push({ msg: '请选择有效的建议类型' });
-    } else if (!Object.keys(SUGGESTION_TYPES).includes(req.body.type)) {
-      errors.push({ msg: '建议类型无效' });
-    }
-    
-    if (!req.body.content) {
-      errors.push({ msg: '内容不能为空' });
-    } else if (req.body.content.length < 20) {
-      errors.push({ msg: '内容不能少于20个字符' });
-    }
-    
-    if (!req.body.expectedBenefit) {
-      errors.push({ msg: '预期效果不能为空' });
-    }
-    
-    // 如果有验证错误
-    if (errors.length > 0) {
-      // 如果上传了文件，需要删除
-      if (req.files && req.files.length > 0) {
-        req.files.forEach(file => {
-          fs.unlink(file.path, err => {
-            if (err) console.error('删除文件失败:', err);
-          });
-        });
-      }
-      return res.status(400).json({ message: errors[0].msg, errors: errors });
-    }
-
-    const { title, type, content, expectedBenefit } = req.body;
-    
-    // 处理附件
-    let attachments = [];
-    if (req.files && req.files.length > 0) {
-      attachments = req.files.map(file => {
-        const safeOriginalname = Buffer.from(file.originalname, 'latin1').toString('utf8');
-        
-        return {
-          filename: file.filename,
-          originalname: safeOriginalname,
-          mimetype: file.mimetype,
-          size: file.size
-        };
-      });
-      console.log('处理附件:', attachments);
-    }
-    
-    // 创建新建议
-    const suggestion = new Suggestion({
-      title,
-      type,
-      content,
-      expectedBenefit,
-      submitter: req.user.id,
-      team: req.user.team,  // 从用户信息中获取班组
-      attachments: attachments
-    });
-
-    console.log('准备保存建议:', JSON.stringify(suggestion, null, 2));
-    await suggestion.save();
-    console.log('建议保存成功，ID:', suggestion._id);
-    
-    // 填充提交者信息
-    await suggestion.populate('submitter', 'name team');
-    
-    console.log('返回建议数据:', JSON.stringify(suggestion, null, 2));
-    res.status(201).json({ 
-      message: '建议提交成功', 
-      suggestion 
-    });
-  } catch (error) {
-    // 如果保存失败且上传了文件，需要删除文件
-    if (req.files && req.files.length > 0) {
-      req.files.forEach(file => {
-        fs.unlink(file.path, err => {
-          if (err) console.error('删除文件失败:', err);
-        });
-      });
-    }
-    
-    console.error('提交建议失败:', error);
-    res.status(500).json({ 
-      message: '提交建议失败', 
-      error: error.message 
-    });
-  }
-});
+// The `validateSuggestion` middleware was a placeholder in the original route and is not used.
+// The actual validation logic was manual and has been moved to the controller.
+router.post('/', auth, upload.array('files', 5), suggestionController.createSuggestion);
 
 // 添加健康检查和错误日志路由
 router.get('/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
 });
 
-router.get('/error-log', auth, checkManagerRole, (req, res) => {
+router.get('/error-log', auth, checkDepartmentManagerRole, (req, res) => { // Replaced checkManagerRole
   try {
     const logPath = path.join(__dirname, '../logs/error.log');
     if (fs.existsSync(logPath)) {
@@ -289,7 +159,7 @@ router.put(
   '/:id/first-review',
   [
     auth, 
-    checkSupervisorRole,
+    checkShiftSupervisorRole, // Replaced checkSupervisorRole
     [
       check('approved', '必须指定是否批准').exists(),
       check('comments', '必须提供审核意见').not().isEmpty()
@@ -305,7 +175,7 @@ router.put(
   '/:id/second-review',
   [
     auth, 
-    checkAdminRole,
+    checkAnyAdminRole, // Replaced checkAdminRole
     [
       check('approved', '必须指定是否批准').exists(),
       check('comments', '必须提供审核意见').not().isEmpty()
@@ -321,7 +191,7 @@ router.put(
   '/:id/implementation',
   [
     auth, 
-    checkAdminRole, // 权限检查中间件
+    checkAnyAdminRole, // Replaced checkAdminRole
     // 修正验证规则
     [
       check('status', '必须提供有效的实施状态')
