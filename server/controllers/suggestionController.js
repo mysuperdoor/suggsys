@@ -38,8 +38,8 @@ exports.getSuggestions = async (req, res) => {
     let query = {};
     
     if (title) {
-      query.$text = { $search: title };
-      logger.debug('应用 title 文本搜索 (using $text):', query.$text);
+      query.title = { $regex: title, $options: 'i' };
+      logger.debug('应用 title 文本搜索 (regex):', query.title);
     }
 
     // -- 1. 应用前端传入的显式过滤条件 --
@@ -1343,13 +1343,19 @@ exports.submitReview = async (req, res) => {
     if (!suggestion) {
       return res.status(404).json({ message: '建议不存在' });
     }
+    const reviewer = await User.findById(req.user.id);
+    if (!reviewer) {
+      return res.status(404).json({ message: '审核人不存在' });
+    }
+
+    logger.debug('SubmitReview - Fetched Suggestion:', JSON.stringify(suggestion, null, 2));
+    logger.debug('SubmitReview - Fetched Reviewer:', JSON.stringify(reviewer, null, 2));
     
-    logger.debug('找到建议:', {
-      id: suggestion._id,
-      // status: suggestion.status, // Removed
-      type: suggestion.type,
-      team: suggestion.team
-    });
+    // logger.debug('找到建议:', { // Original logging, can be removed or kept for redundancy
+    //   id: suggestion._id,
+    //   type: suggestion.type,
+    //   team: suggestion.team
+    // });
     
     // 更灵活地验证建议状态
     const currentReviewStatus = suggestion.reviewStatus; // Prefer direct field for now
@@ -1382,17 +1388,17 @@ exports.submitReview = async (req, res) => {
       });
     }
     
-    // 获取审核人
-    const reviewer = await User.findById(req.user.id);
-    if (!reviewer) {
-      return res.status(404).json({ message: '审核人不存在' });
-    }
+    // 获取审核人 // Moved up
+    // const reviewer = await User.findById(req.user.id);
+    // if (!reviewer) {
+    //   return res.status(404).json({ message: '审核人不存在' });
+    // }
     
-    logger.debug('审核人信息:', {
-      id: reviewer._id,
-      role: reviewer.role,
-      team: reviewer.team
-    });
+    // logger.debug('审核人信息:', { // Covered by new JSON.stringify log
+    //   id: reviewer._id,
+    //   role: reviewer.role,
+    //   team: reviewer.team
+    // });
     
     // 验证审核权限
     const canReview = await validateReviewPermission(reviewer, suggestion, reviewType);
