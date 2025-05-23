@@ -1323,17 +1323,17 @@ exports.getImplementationRate = async (req, res) => {
  */
 exports.submitReview = async (req, res) => {
   try {
-    const { suggestionId, reviewType, result, comment } = req.body;
+    const { suggestionId, reviewType, result, comments } = req.body; // Changed comment to comments
     
     logger.debug('接收到审核请求:', {
       suggestionId,
       reviewType,
       result,
-      comment,
+      comments, // Changed comment to comments
       userId: req.user.id
     });
     
-    if (!suggestionId || !reviewType || !result || !comment) {
+    if (!suggestionId || !reviewType || !result || !comments) { // Changed comment to comments
       return res.status(400).json({ message: '缺少必要参数' });
     }
     
@@ -1453,7 +1453,7 @@ exports.submitReview = async (req, res) => {
     const review = {
       reviewer: req.user.id,
       result: result === 'approve' ? 'APPROVED' : 'REJECTED',
-      comments: comment,
+      comments: comments, // Changed comment to comments
       reviewedAt: new Date()
     };
     
