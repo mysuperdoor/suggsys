@@ -1,4 +1,4 @@
-const { Suggestion, SUGGESTION_STATUS } = require('../models/Suggestion');
+const { Suggestion } = require('../models/Suggestion'); // Removed SUGGESTION_STATUS
 const { User } = require('../models/User');
 const mongoose = require('mongoose');
 const fs = require('fs');
@@ -8,19 +8,12 @@ const { validateSuggestion } = require('../utils/validation');
 // const { Review, REVIEW_LEVELS, REVIEW_RESULTS } = require('../models/Review'); // DEPRECATED, model file is commented out
 const { notifyReviewers } = require('../utils/notificationUtils');
 // 导入前端定义的常量
-const { IMPLEMENTATION_STATUS, SUGGESTION_TYPES } = require('../../client/src/constants/suggestions'); // Added SUGGESTION_TYPES
+const { REVIEW_STATUS, IMPLEMENTATION_STATUS, SUGGESTION_TYPES } = require('../../client/src/constants/suggestions'); // Added SUGGESTION_TYPES
 const Logger = require('../utils/logger');
 
 const logger = new Logger('SuggestionController');
 
-// 审核状态常量
-const REVIEW_STATUS = {
-  PENDING_FIRST_REVIEW: '等待一级审核',
-  PENDING_SECOND_REVIEW: '等待二级审核',
-  APPROVED: '已批准',
-  REJECTED: '已驳回',
-  WITHDRAWN: '已撤回'
-};
+// 审核状态常量 // Removed local REVIEW_STATUS
 
 exports.getSuggestions = async (req, res) => {
   try {
@@ -45,8 +38,8 @@ exports.getSuggestions = async (req, res) => {
     let query = {};
     
     if (title) {
-      query.title = { $regex: title, $options: 'i' };
-      logger.debug('应用 title 文本搜索:', query.title);
+      query.$text = { $search: title };
+      logger.debug('应用 title 文本搜索 (using $text):', query.$text);
     }
 
     // -- 1. 应用前端传入的显式过滤条件 --
@@ -103,10 +96,10 @@ exports.getSuggestions = async (req, res) => {
           }
         } else if (req.user.role === '安全科管理人员') {
           // 安全科管理人员只能看到安全类建议
-          query.type = 'SAFETY';
+          query.type = SUGGESTION_TYPES.SAFETY;
         } else if (req.user.role === '运行科管理人员') {
           // 运行科管理人员只能看到非安全类建议
-          query.type = { $ne: 'SAFETY' };
+          query.type = { $ne: SUGGESTION_TYPES.SAFETY };
         }
         // 部门经理默认看到所有建议 (无需修改)
     }
@@ -169,7 +162,7 @@ exports.getSuggestions = async (req, res) => {
       })
       .populate({
         path: 'implementation.history.updatedBy', // 尝试填充实施历史更新人
-        select: 'name username role',
+        select: 'name', // Optimized selection
         model: 'User'
       })
       // 应用排序选项
@@ -290,72 +283,73 @@ exports.getSuggestionById = async (req, res) => {
   }
 };
 
-exports.updateSuggestionStatus = async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
-
-    const { status, comment } = req.body;
-    const suggestion = await Suggestion.findById(req.params.id);
-
-    if (!suggestion) {
-      return res.status(404).json({ message: '建议不存在' });
-    }
-
-    // 检查权限
-    if (req.user.role !== '部门经理') {
-      return res.status(403).json({ message: '没有权限更新建议状态' });
-    }
-
-    // 更新状态
-    suggestion.status = status;
-    
-    // 添加评论
-    if (comment) {
-      suggestion.comments.push({
-        author: req.user.id,
-        content: comment
-      });
-    }
-
-    await suggestion.save();
-
-    // 返回更新后的建议
-    const updatedSuggestion = await Suggestion.findById(req.params.id)
-      .populate('submitter', 'name team')
-      .populate({
-        path: 'comments.author',
-        select: 'name',
-        model: 'User'
-      })
-      .populate({
-        path: 'firstReview secondReview',
-        populate: {
-          path: 'reviewer',
-          select: 'name',
-          model: 'User'
-        }
-      })
-      .lean();
-
-    // 处理null值
-    const processedSuggestion = {
-      ...updatedSuggestion,
-      submitter: updatedSuggestion.submitter || { name: '未知用户', _id: null },
-      comments: Array.isArray(updatedSuggestion.comments) ? updatedSuggestion.comments.map(comment => ({
-        ...comment,
-        author: comment.author || { name: '未知用户' }
-      })) : []
-    };
-
-    res.json(processedSuggestion);
-  } catch (error) {
-    logger.error('更新建议状态失败:', error);
-    res.status(500).json({ message: '更新建议状态失败', error: error.message });
-  }
-};
+// TODO: Review for removal or refactoring to use reviewStatus/implementationStatus
+// exports.updateSuggestionStatus = async (req, res) => {
+//   try {
+//     const errors = validationResult(req);
+//     if (!errors.isEmpty()) {
+//       return res.status(400).json({ errors: errors.array() });
+//     }
+// 
+//     const { status, comment } = req.body;
+//     const suggestion = await Suggestion.findById(req.params.id);
+// 
+//     if (!suggestion) {
+//       return res.status(404).json({ message: '建议不存在' });
+//     }
+// 
+//     // 检查权限
+//     if (req.user.role !== '部门经理') {
+//       return res.status(403).json({ message: '没有权限更新建议状态' });
+//     }
+// 
+//     // 更新状态
+//     suggestion.status = status;
+//     
+//     // 添加评论
+//     if (comment) {
+//       suggestion.comments.push({
+//         author: req.user.id,
+//         content: comment
+//       });
+//     }
+// 
+//     await suggestion.save();
+// 
+//     // 返回更新后的建议
+//     const updatedSuggestion = await Suggestion.findById(req.params.id)
+//       .populate('submitter', 'name team')
+//       .populate({
+//         path: 'comments.author',
+//         select: 'name',
+//         model: 'User'
+//       })
+//       .populate({
+//         path: 'firstReview secondReview',
+//         populate: {
+//           path: 'reviewer',
+//           select: 'name',
+//           model: 'User'
+//         }
+//       })
+//       .lean();
+// 
+//     // 处理null值
+//     const processedSuggestion = {
+//       ...updatedSuggestion,
+//       submitter: updatedSuggestion.submitter || { name: '未知用户', _id: null },
+//       comments: Array.isArray(updatedSuggestion.comments) ? updatedSuggestion.comments.map(comment => ({
+//         ...comment,
+//         author: comment.author || { name: '未知用户' }
+//       })) : []
+//     };
+// 
+//     res.json(processedSuggestion);
+//   } catch (error) {
+//     logger.error('更新建议状态失败:', error);
+//     res.status(500).json({ message: '更新建议状态失败', error: error.message });
+//   }
+// };
 
 exports.addComment = async (req, res) => {
   try {
@@ -678,18 +672,18 @@ exports.getPendingReviewSuggestions = async (req, res) => {
     if (userRole === '值班主任') {
       // 值班主任只能看到自己团队待一级审核的建议
       query.team = userTeam;
-      query.status = 'PENDING_FIRST_REVIEW';
+      query.reviewStatus = REVIEW_STATUS.PENDING_FIRST_REVIEW;
     } else if (userRole === '安全科管理人员') {
       // 安全科管理人员只能看到安全类的待二级审核的建议
-      query.type = 'SAFETY';
-      query.status = 'PENDING_SECOND_REVIEW';
+      query.type = SUGGESTION_TYPES.SAFETY;
+      query.reviewStatus = REVIEW_STATUS.PENDING_SECOND_REVIEW;
     } else if (userRole === '运行科管理人员') {
       // 运行科管理人员只能看到非安全类的待二级审核的建议
-      query.type = { $ne: 'SAFETY' };
-      query.status = 'PENDING_SECOND_REVIEW';
+      query.type = { $ne: SUGGESTION_TYPES.SAFETY };
+      query.reviewStatus = REVIEW_STATUS.PENDING_SECOND_REVIEW;
     } else if (userRole === '部门经理') {
       // 部门经理可以看到所有待审核的建议
-      query.status = { $in: ['PENDING_FIRST_REVIEW', 'PENDING_SECOND_REVIEW'] };
+      query.reviewStatus = { $in: [REVIEW_STATUS.PENDING_FIRST_REVIEW, REVIEW_STATUS.PENDING_SECOND_REVIEW] };
     }
 
     // 获取总数
@@ -969,11 +963,11 @@ exports.updateSuggestion = async (req, res) => {
     }
     
     // 验证建议是否可以更新（只有在等待一级审核状态下才能更新）
-    console.log('控制器层 - 建议状态:', suggestion.status);
+    // console.log('控制器层 - 建议状态:', suggestion.status); // Removed
     console.log('控制器层 - 建议reviewStatus:', suggestion.reviewStatus);
     
     // 直接使用字符串比较，检查reviewStatus字段
-    if (suggestion.reviewStatus !== 'PENDING_FIRST_REVIEW') {
+    if (suggestion.reviewStatus !== REVIEW_STATUS.PENDING_FIRST_REVIEW) {
       return res.status(400).json({ 
         message: '只有等待一级审核的建议才能更新',
         userMessage: '建议已进入审核流程，无法修改'
@@ -1003,7 +997,7 @@ exports.updateSuggestion = async (req, res) => {
     
     // 添加更新记录到实施记录中
     suggestion.implementationRecords.push({
-      status: 'PENDING_FIRST_REVIEW',
+      status: REVIEW_STATUS.PENDING_FIRST_REVIEW,
       comments: '建议已更新',
       updatedBy: userId
     });
@@ -1012,7 +1006,7 @@ exports.updateSuggestion = async (req, res) => {
     
     // 返回更新后的建议
     const updatedSuggestion = await Suggestion.findById(id)
-      .populate('author', 'name username department team');
+      .populate('submitter', 'name team'); // Corrected path and optimized selection
     
     res.json(updatedSuggestion);
   } catch (error) {
@@ -1153,15 +1147,26 @@ exports.getSuggestionStats = async (req, res) => {
   try {
     const totalCount = await Suggestion.countDocuments();
     
-    // 按状态统计
-    const statusCounts = await Suggestion.aggregate([
-      {
-        $group: {
-          _id: '$status',
-          count: { $sum: 1 }
-        }
-      }
+    // 按审核状态统计
+    const reviewStatusCounts = await Suggestion.aggregate([
+      { $group: { _id: '$reviewStatus', count: { $sum: 1 } } }
     ]);
+    const formattedReviewStatusCounts = reviewStatusCounts.map(item => ({
+      statusKey: item._id,
+      statusName: REVIEW_STATUS[item._id] || item._id, // Use imported REVIEW_STATUS for name
+      count: item.count
+    }));
+
+    // 按实施状态统计 (for approved suggestions)
+    const implementationStatusCounts = await Suggestion.aggregate([
+      { $match: { reviewStatus: REVIEW_STATUS.APPROVED } },
+      { $group: { _id: '$implementationStatus', count: { $sum: 1 } } }
+    ]);
+    const formattedImplementationStatusCounts = implementationStatusCounts.map(item => ({
+      statusKey: item._id,
+      statusName: IMPLEMENTATION_STATUS[item._id] || item._id, // Use imported IMPLEMENTATION_STATUS
+      count: item.count
+    }));
     
     // 按类别统计
     const categoryCounts = await Suggestion.aggregate([
@@ -1194,16 +1199,12 @@ exports.getSuggestionStats = async (req, res) => {
       }
     ]);
     
-    // 格式化状态统计结果
-    const formattedStatusCounts = statusCounts.map(item => ({
-      status: SUGGESTION_STATUS[item._id],
-      statusKey: item._id,
-      count: item.count
-    }));
+    // 格式化状态统计结果 // Removed old formattedStatusCounts
     
     res.json({
       totalCount,
-      statusCounts: formattedStatusCounts,
+      reviewStatusCounts: formattedReviewStatusCounts,
+      implementationStatusCounts: formattedImplementationStatusCounts,
       categoryCounts,
       departmentStats
     });
@@ -1218,12 +1219,13 @@ exports.getImplementationRate = async (req, res) => {
   try {
     // 获取总审核通过的建议数
     const approvedTotal = await Suggestion.countDocuments({
-      status: { $in: ['NOT_IMPLEMENTED', 'IMPLEMENTING', 'COMPLETED'] }
+      reviewStatus: REVIEW_STATUS.APPROVED
     });
     
     // 获取已完成实施的建议数
     const completedCount = await Suggestion.countDocuments({
-      status: 'COMPLETED'
+      reviewStatus: REVIEW_STATUS.APPROVED, // Ensure it's an approved suggestion
+      implementationStatus: IMPLEMENTATION_STATUS.COMPLETED
     });
     
     // 计算实施完成率
@@ -1233,7 +1235,8 @@ exports.getImplementationRate = async (req, res) => {
     const implementationTimes = await Suggestion.aggregate([
       {
         $match: {
-          status: 'COMPLETED',
+          reviewStatus: REVIEW_STATUS.APPROVED,
+          implementationStatus: IMPLEMENTATION_STATUS.COMPLETED,
           implementationDate: { $exists: true }
         }
       },
@@ -1261,7 +1264,8 @@ exports.getImplementationRate = async (req, res) => {
     const monthlyStats = await Suggestion.aggregate([
       {
         $match: {
-          status: 'COMPLETED',
+          reviewStatus: REVIEW_STATUS.APPROVED,
+          implementationStatus: IMPLEMENTATION_STATUS.COMPLETED,
           implementationDate: { $exists: true }
         }
       },
@@ -1342,48 +1346,39 @@ exports.submitReview = async (req, res) => {
     
     logger.debug('找到建议:', {
       id: suggestion._id,
-      status: suggestion.status,
+      // status: suggestion.status, // Removed
       type: suggestion.type,
       team: suggestion.team
     });
     
     // 更灵活地验证建议状态
-    const currentDbStatus = suggestion.reviewStatus || suggestion.status; // 获取当前状态（优先reviewStatus）
-    const isPendingFirstReview = [
-      'PENDING_FIRST_REVIEW',               // 检查 Key
-      REVIEW_STATUS.PENDING_FIRST_REVIEW, // 检查 Value ('等待一级审核')
-      // 如果还有其他可能的旧值，也加在这里
-    ].includes(currentDbStatus);
-    
-    const isPendingSecondReview = [
-      'PENDING_SECOND_REVIEW',              // 检查 Key
-      REVIEW_STATUS.PENDING_SECOND_REVIEW, // 检查 Value ('等待二级审核')
-      // 如果还有其他可能的旧值，也加在这里
-    ].includes(currentDbStatus);
+    const currentReviewStatus = suggestion.reviewStatus; // Prefer direct field for now
+    const isPendingFirstReview = currentReviewStatus === REVIEW_STATUS.PENDING_FIRST_REVIEW;
+    const isPendingSecondReview = currentReviewStatus === REVIEW_STATUS.PENDING_SECOND_REVIEW;
     
     logger.debug('状态验证结果:', {
-      statusFromDb: suggestion.status, // 保留原始日志
+      // statusFromDb: suggestion.status, // Removed
       reviewStatusFromDb: suggestion.reviewStatus, // 增加 reviewStatus 日志
-      currentDbStatus: currentDbStatus, // 增加合并后的状态日志
+      currentReviewStatus: currentReviewStatus, // 增加合并后的状态日志
       isPendingFirstReview,
       isPendingSecondReview,
-      SUGGESTION_STATUS_VALUE: REVIEW_STATUS.PENDING_FIRST_REVIEW
+      // SUGGESTION_STATUS_VALUE: REVIEW_STATUS.PENDING_FIRST_REVIEW // This was local before, now imported
     });
     
     // 验证建议状态
     if (reviewType === 'first' && !isPendingFirstReview) {
       return res.status(400).json({ 
         message: '建议不处于待一级审核状态',
-        currentStatus: currentDbStatus, // 使用合并后的状态
-        expectedStatus: REVIEW_STATUS.PENDING_FIRST_REVIEW
+        currentStatus: currentReviewStatus, // 使用合并后的状态
+        expectedStatus: REVIEW_STATUS.PENDING_FIRST_REVIEW // Use imported enum key
       });
     }
     
     if (reviewType === 'second' && !isPendingSecondReview) {
       return res.status(400).json({ 
         message: '建议不处于待二级审核状态',
-        currentStatus: currentDbStatus, // 使用合并后的状态
-        expectedStatus: REVIEW_STATUS.PENDING_SECOND_REVIEW
+        currentStatus: currentReviewStatus, // 使用合并后的状态
+        expectedStatus: REVIEW_STATUS.PENDING_SECOND_REVIEW // Use imported enum key
       });
     }
     
@@ -1417,16 +1412,16 @@ exports.submitReview = async (req, res) => {
     if (reviewType === 'first') {
       suggestion.firstReview = review;
       if (result === 'approve') {
-        suggestion.reviewStatus = 'PENDING_SECOND_REVIEW';
+        suggestion.reviewStatus = REVIEW_STATUS.PENDING_SECOND_REVIEW;
         // suggestion.status = 'PENDING_SECOND_REVIEW'; // REMOVED old status field update
       } else {
-        suggestion.reviewStatus = 'REJECTED';
+        suggestion.reviewStatus = REVIEW_STATUS.REJECTED;
         // suggestion.status = 'REJECTED'; // REMOVED old status field update
       }
     } else if (reviewType === 'second') {
       suggestion.secondReview = review;
       if (result === 'approve') {
-        suggestion.reviewStatus = 'APPROVED';
+        suggestion.reviewStatus = REVIEW_STATUS.APPROVED;
         // suggestion.status = 'NOT_IMPLEMENTED'; // REMOVED old status field update
         // Initialize implementation status
         suggestion.implementationStatus = IMPLEMENTATION_STATUS.NOT_STARTED; // Using constant
@@ -1440,7 +1435,7 @@ exports.submitReview = async (req, res) => {
           }]
         };
       } else {
-        suggestion.reviewStatus = 'REJECTED';
+        suggestion.reviewStatus = REVIEW_STATUS.REJECTED;
         // suggestion.status = 'REJECTED'; // REMOVED old status field update
       }
     }
@@ -1616,13 +1611,22 @@ exports.getImplementationStats = async (req, res) => {
   try {
     // 获取已批准建议总数
     const approvedCount = await Suggestion.countDocuments({
-      status: { $in: ['NOT_IMPLEMENTED', 'IMPLEMENTING', 'COMPLETED'] }
+      reviewStatus: REVIEW_STATUS.APPROVED
     });
     
     // 获取各实施状态的数量
-    const implementingCount = await Suggestion.countDocuments({ status: 'IMPLEMENTING' });
-    const completedCount = await Suggestion.countDocuments({ status: 'COMPLETED' });
-    const notImplementedCount = await Suggestion.countDocuments({ status: 'NOT_IMPLEMENTED' });
+    const implementingCount = await Suggestion.countDocuments({
+      reviewStatus: REVIEW_STATUS.APPROVED,
+      implementationStatus: IMPLEMENTATION_STATUS.IN_PROGRESS
+    });
+    const completedCount = await Suggestion.countDocuments({
+      reviewStatus: REVIEW_STATUS.APPROVED,
+      implementationStatus: IMPLEMENTATION_STATUS.COMPLETED
+    });
+    const notImplementedCount = await Suggestion.countDocuments({
+      reviewStatus: REVIEW_STATUS.APPROVED,
+      implementationStatus: IMPLEMENTATION_STATUS.NOT_STARTED
+    });
     
     // 计算实施率
     const implementationRate = approvedCount > 0 
@@ -1632,7 +1636,11 @@ exports.getImplementationStats = async (req, res) => {
     // 按月统计实施完成数量
     const monthlyStats = await Suggestion.aggregate([
       {
-        $match: { status: 'COMPLETED', implementationDate: { $exists: true } }
+        $match: { 
+          reviewStatus: REVIEW_STATUS.APPROVED,
+          implementationStatus: IMPLEMENTATION_STATUS.COMPLETED, 
+          implementationDate: { $exists: true } 
+        }
       },
       {
         $group: {
@@ -1649,7 +1657,10 @@ exports.getImplementationStats = async (req, res) => {
     // 按类型统计实施完成情况
     const typeStats = await Suggestion.aggregate([
       {
-        $match: { status: 'COMPLETED' }
+        $match: { 
+          reviewStatus: REVIEW_STATUS.APPROVED,
+          implementationStatus: IMPLEMENTATION_STATUS.COMPLETED 
+        }
       },
       {
         $group: {
@@ -1662,7 +1673,10 @@ exports.getImplementationStats = async (req, res) => {
     // 按班组统计实施完成情况
     const teamStats = await Suggestion.aggregate([
       {
-        $match: { status: 'COMPLETED' }
+        $match: { 
+          reviewStatus: REVIEW_STATUS.APPROVED,
+          implementationStatus: IMPLEMENTATION_STATUS.COMPLETED 
+        }
       },
       {
         $group: {
@@ -1709,6 +1723,7 @@ exports.firstReview = async (req, res) => {
 
     // 检查建议是否处于待一级审核状态
     // Using reviewStatus for the check now
+    // Ensure REVIEW_STATUS.PENDING_FIRST_REVIEW is the imported constant
     if (suggestion.reviewStatus !== REVIEW_STATUS.PENDING_FIRST_REVIEW) {
       return res.status(400).json({ message: '建议不处于待一级审核状态', currentStatus: suggestion.reviewStatus });
     }
@@ -1779,16 +1794,17 @@ exports.secondReview = async (req, res) => {
 
     // 检查建议是否处于待二级审核状态
     // Using reviewStatus for the check now
+    // Ensure REVIEW_STATUS.PENDING_SECOND_REVIEW is the imported constant
     if (suggestion.reviewStatus !== REVIEW_STATUS.PENDING_SECOND_REVIEW) {
       return res.status(400).json({ message: '建议不处于待二级审核状态', currentStatus: suggestion.reviewStatus });
     }
 
     // 检查权限
     const userRole = req.user.role;
-    if (userRole === '安全科管理人员' && suggestion.type !== 'SAFETY') {
+    if (userRole === '安全科管理人员' && suggestion.type !== SUGGESTION_TYPES.SAFETY) {
       return res.status(403).json({ message: '安全科管理人员只能审核安全类建议' });
     }
-    if (userRole === '运行科管理人员' && suggestion.type === 'SAFETY') {
+    if (userRole === '运行科管理人员' && suggestion.type === SUGGESTION_TYPES.SAFETY) {
       return res.status(403).json({ message: '运行科管理人员不能审核安全类建议' });
     }
 
@@ -1871,7 +1887,7 @@ exports.scoreSuggestion = async (req, res) => {
     }
 
     // 新增校验：确保建议状态是 APPROVED
-    if (suggestion.reviewStatus !== 'APPROVED') {
+    if (suggestion.reviewStatus !== REVIEW_STATUS.APPROVED) {
       return res.status(400).json({ success: false, message: '建议必须处于已批准状态才能评分' });
     }
 
