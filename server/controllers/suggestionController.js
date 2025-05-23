@@ -669,25 +669,34 @@ exports.getPendingReviewSuggestions = async (req, res) => {
     const userRole = req.user.role;
     const userTeam = req.user.team;
 
+    logger.debug('获取待审核建议 - 用户信息:', {
+      userRole,
+      userTeam
+    });
+
     if (userRole === '值班主任') {
-      // 值班主任只能看到自己团队待一级审核的建议
-      query.team = userTeam;
+      // 值班主任可以看到所有待一级审核的建议
       query.reviewStatus = REVIEW_STATUS.PENDING_FIRST_REVIEW;
+      logger.debug('值班主任查询条件:', query);
     } else if (userRole === '安全科管理人员') {
       // 安全科管理人员只能看到安全类的待二级审核的建议
       query.type = SUGGESTION_TYPES.SAFETY;
       query.reviewStatus = REVIEW_STATUS.PENDING_SECOND_REVIEW;
+      logger.debug('安全科管理人员查询条件:', query);
     } else if (userRole === '运行科管理人员') {
       // 运行科管理人员只能看到非安全类的待二级审核的建议
       query.type = { $ne: SUGGESTION_TYPES.SAFETY };
       query.reviewStatus = REVIEW_STATUS.PENDING_SECOND_REVIEW;
+      logger.debug('运行科管理人员查询条件:', query);
     } else if (userRole === '部门经理') {
       // 部门经理可以看到所有待审核的建议
       query.reviewStatus = { $in: [REVIEW_STATUS.PENDING_FIRST_REVIEW, REVIEW_STATUS.PENDING_SECOND_REVIEW] };
+      logger.debug('部门经理查询条件:', query);
     }
 
     // 获取总数
     const total = await Suggestion.countDocuments(query);
+    logger.debug(`找到 ${total} 条待审核建议`);
     
     // 获取建议列表
     const suggestions = await Suggestion.find(query)
@@ -1343,19 +1352,34 @@ exports.submitReview = async (req, res) => {
     if (!suggestion) {
       return res.status(404).json({ message: '建议不存在' });
     }
+    
+    // 添加更详细的建议信息日志
+    logger.debug('建议详细信息:', {
+      id: suggestion._id,
+      title: suggestion.title,
+      type: suggestion.type,
+      team: suggestion.team,
+      reviewStatus: suggestion.reviewStatus,
+      implementationStatus: suggestion.implementationStatus,
+      firstReview: suggestion.firstReview ? '已存在' : '不存在',
+      secondReview: suggestion.secondReview ? '已存在' : '不存在'
+    });
+
     const reviewer = await User.findById(req.user.id);
     if (!reviewer) {
       return res.status(404).json({ message: '审核人不存在' });
     }
 
+    // 添加详细的审核人信息日志
+    logger.debug('审核人详细信息:', {
+      id: reviewer._id,
+      name: reviewer.name,
+      role: reviewer.role,
+      team: reviewer.team
+    });
+    
     logger.debug('SubmitReview - Fetched Suggestion:', JSON.stringify(suggestion, null, 2));
     logger.debug('SubmitReview - Fetched Reviewer:', JSON.stringify(reviewer, null, 2));
-    
-    // logger.debug('找到建议:', { // Original logging, can be removed or kept for redundancy
-    //   id: suggestion._id,
-    //   type: suggestion.type,
-    //   team: suggestion.team
-    // });
     
     // 更灵活地验证建议状态
     const currentReviewStatus = suggestion.reviewStatus; // Prefer direct field for now
@@ -1363,16 +1387,29 @@ exports.submitReview = async (req, res) => {
     const isPendingSecondReview = currentReviewStatus === REVIEW_STATUS.PENDING_SECOND_REVIEW;
     
     logger.debug('状态验证结果:', {
-      // statusFromDb: suggestion.status, // Removed
-      reviewStatusFromDb: suggestion.reviewStatus, // 增加 reviewStatus 日志
-      currentReviewStatus: currentReviewStatus, // 增加合并后的状态日志
+      reviewStatusFromDb: suggestion.reviewStatus, 
+      currentReviewStatus: currentReviewStatus,
       isPendingFirstReview,
       isPendingSecondReview,
-      // SUGGESTION_STATUS_VALUE: REVIEW_STATUS.PENDING_FIRST_REVIEW // This was local before, now imported
+      expectedFirstReviewStatus: REVIEW_STATUS.PENDING_FIRST_REVIEW,
+      expectedSecondReviewStatus: REVIEW_STATUS.PENDING_SECOND_REVIEW,
+      reviewType: reviewType,
+      // 添加枚举值的比较
+      statusComparison: {
+        valueInDB: currentReviewStatus,
+        expectedValueForFirstReview: REVIEW_STATUS.PENDING_FIRST_REVIEW,
+        isEqual: currentReviewStatus === REVIEW_STATUS.PENDING_FIRST_REVIEW
+      }
     });
     
     // 验证建议状态
     if (reviewType === 'first' && !isPendingFirstReview) {
+      logger.debug('一级审核状态验证失败:', {
+        currentStatus: currentReviewStatus,
+        expectedStatus: REVIEW_STATUS.PENDING_FIRST_REVIEW,
+        isEqual: currentReviewStatus === REVIEW_STATUS.PENDING_FIRST_REVIEW
+      });
+      
       return res.status(400).json({ 
         message: '建议不处于待一级审核状态',
         currentStatus: currentReviewStatus, // 使用合并后的状态
@@ -1381,6 +1418,12 @@ exports.submitReview = async (req, res) => {
     }
     
     if (reviewType === 'second' && !isPendingSecondReview) {
+      logger.debug('二级审核状态验证失败:', {
+        currentStatus: currentReviewStatus,
+        expectedStatus: REVIEW_STATUS.PENDING_SECOND_REVIEW,
+        isEqual: currentReviewStatus === REVIEW_STATUS.PENDING_SECOND_REVIEW
+      });
+      
       return res.status(400).json({ 
         message: '建议不处于待二级审核状态',
         currentStatus: currentReviewStatus, // 使用合并后的状态
@@ -1486,15 +1529,25 @@ const validateReviewPermission = async (reviewer, suggestion, reviewType) => {
   const role = reviewer.role;
   const team = reviewer.team;
 
+  logger.debug('审核权限验证:', {
+    reviewerRole: role,
+    reviewerTeam: team,
+    suggestionTeam: suggestion.team,
+    reviewType: reviewType,
+    suggestionType: suggestion.type
+  });
+
   // 部门经理可以进行所有审核
   if (role === '部门经理') {
+    logger.debug('部门经理有所有审核权限');
     return true;
   }
 
   // 一级审核权限验证
   if (reviewType === 'first') {
-    // 值班主任只能审核自己班组的建议
-    if (role === '值班主任' && team === suggestion.team) {
+    // 允许当班值班主任审核所有班组建议
+    if (role === '值班主任') {
+      logger.debug('值班主任获得一级审核权限');
       return true;
     }
   }
@@ -1503,14 +1556,22 @@ const validateReviewPermission = async (reviewer, suggestion, reviewType) => {
   if (reviewType === 'second') {
     // 安全科管理人员只能审核安全类建议
     if (role === '安全科管理人员' && suggestion.type === 'SAFETY') {
+      logger.debug('安全科管理人员获得安全类建议二级审核权限');
       return true;
     }
     // 运行科管理人员只能审核非安全类建议
     if (role === '运行科管理人员' && suggestion.type !== 'SAFETY') {
+      logger.debug('运行科管理人员获得非安全类建议二级审核权限');
       return true;
     }
   }
 
+  logger.debug('审核权限验证失败:', {
+    reviewerRole: role,
+    reviewerTeam: team,
+    suggestionTeam: suggestion.team,
+    reviewType: reviewType
+  });
   return false;
 };
 
@@ -1996,3 +2057,69 @@ exports.scoreSuggestion = async (req, res) => {
     });
   }
 }; 
+
+/**
+ * 临时接口：检查并修复建议状态
+ * @param {Object} req - 请求对象
+ * @param {Object} res - 响应对象
+ */
+exports.checkAndFixSuggestionStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { fix } = req.query; // 是否修复状态
+    
+    // 获取建议信息
+    const suggestion = await Suggestion.findById(id);
+    if (!suggestion) {
+      return res.status(404).json({ message: '建议不存在' });
+    }
+    
+    // 记录当前状态
+    const currentStatus = {
+      id: suggestion._id,
+      title: suggestion.title,
+      type: suggestion.type,
+      team: suggestion.team,
+      reviewStatus: suggestion.reviewStatus,
+      implementationStatus: suggestion.implementationStatus,
+      createdAt: suggestion.createdAt,
+      updatedAt: suggestion.updatedAt,
+      firstReview: suggestion.firstReview,
+      secondReview: suggestion.secondReview
+    };
+    
+    logger.debug('建议当前状态:', currentStatus);
+    
+    // 如果请求包含fix=true，将尝试修复状态
+    if (fix === 'true') {
+      // 重置为待一级审核状态
+      suggestion.reviewStatus = 'PENDING_FIRST_REVIEW';
+      
+      // 重置其他相关字段
+      suggestion.firstReview = null;
+      suggestion.secondReview = null;
+      
+      await suggestion.save();
+      
+      logger.debug('已修复建议状态为待一级审核');
+      
+      return res.json({
+        message: '建议状态已修复为待一级审核',
+        previousStatus: currentStatus,
+        currentStatus: {
+          id: suggestion._id,
+          reviewStatus: suggestion.reviewStatus
+        }
+      });
+    }
+    
+    // 不修复，仅返回当前状态
+    return res.json({
+      message: '建议当前状态',
+      suggestion: currentStatus
+    });
+  } catch (error) {
+    logger.error('检查/修复建议状态失败:', error);
+    res.status(500).json({ message: '服务器错误', error: error.message });
+  }
+};

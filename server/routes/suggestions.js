@@ -446,4 +446,7 @@ router.get('/:id/implementation-records', auth, async (req, res) => {
 // 提交审核
 router.post('/review', auth, suggestionController.submitReview);
 
+// 临时接口：检查并修复建议状态
+router.get('/:id/check-status', auth, suggestionController.checkAndFixSuggestionStatus);
+
 module.exports = router; 

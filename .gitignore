@@ -35,6 +35,8 @@ coverage/
 # IDEs and editors
 .vscode/
 .idea/
+.cursor/
+.specstory/
 *.swp
 *.swo
 *~
