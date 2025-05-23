@@ -3,7 +3,7 @@ import { Form, Input, Button, Card, message } from 'antd';
 import { UserOutlined, LockOutlined } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom'; // Added useLocation
 // Removed direct axios import, will use authService via context
-import AuthContext from '../../context/AuthContext'; // Import AuthContext
+import AuthContext from '../context/AuthContext'; // Import AuthContext
 
 const Login = () => {
   const navigate = useNavigate();
