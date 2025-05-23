@@ -9,9 +9,12 @@ import {
   Select,
   Row,
   Col,
-  Form
+  Form,
+  Modal, // Added for review modal
+  Radio  // Added for review modal
 } from 'antd';
-import { EyeOutlined, EditOutlined, SearchOutlined } from '@ant-design/icons';
+// EditOutlined might be reused or replaced with a more specific review icon if desired
+import { EyeOutlined, EditOutlined, SearchOutlined, CheckCircleOutlined } from '@ant-design/icons'; 
 import { Link } from 'react-router-dom';
 import { suggestionService } from '../../services/suggestionService';
 import { authService } from '../../services/authService';
@@ -45,8 +48,15 @@ const SuggestionList = () => {
   const [filterReviewStatus, setFilterReviewStatus] = useState('ALL');
   const [filterImplementationStatus, setFilterImplementationStatus] = useState('ALL');
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+  
+  // State for review modal
+  const [reviewModalVisible, setReviewModalVisible] = useState(false);
+  const [currentSuggestionForReview, setCurrentSuggestionForReview] = useState(null);
+  const [reviewActionType, setReviewActionType] = useState(''); // 'first' or 'second'
+  const [reviewForm] = Form.useForm();
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
 
-  const currentUser = authService.getCurrentUser();
+  const currentUser = authService.getCurrentUser(); // This might need to be updated to useAuth context if other parts are refactored
   const isManager = currentUser?.role === '部门经理';
   const isSupervisor = currentUser?.role === '值班主任';
   const isSafetyAdmin = currentUser?.role === '安全科管理人员';
@@ -186,6 +196,56 @@ const SuggestionList = () => {
   const handleView = (record) => {
     navigate(`/suggestions/${record._id}`);
   };
+
+  // Functions for review modal, similar to ReviewList.js
+  const handleOpenReviewModal = (suggestion, actionType) => {
+    setCurrentSuggestionForReview(suggestion);
+    setReviewActionType(actionType);
+    reviewForm.resetFields(); // Reset form when opening
+    setReviewModalVisible(true);
+  };
+
+  const handleCloseReviewModal = () => {
+    setReviewModalVisible(false);
+    setCurrentSuggestionForReview(null);
+    setReviewActionType('');
+    reviewForm.resetFields();
+  };
+
+  const handleReviewSubmitInList = async (values) => {
+    if (!currentSuggestionForReview || !reviewActionType) return;
+    setReviewSubmitting(true);
+    try {
+      const reviewData = {
+        suggestionId: currentSuggestionForReview._id,
+        reviewType: reviewActionType,
+        result: values.result,
+        comment: values.comment,
+        reviewerId: currentUser?._id // Assuming currentUser state holds the logged-in user's info
+      };
+      
+      const response = await suggestionService.submitReview(reviewData);
+      message.success('审核提交成功');
+      
+      // Update local state immediately
+      if (response && response.suggestion) {
+        // If the suggestion's status changes such that it would no longer be in this list
+        // (e.g. it's no longer PENDING_FIRST_REVIEW), we should remove it.
+        // Or, more simply, refetch the list to ensure consistency.
+        // For now, a simple refetch. A more advanced version might update the specific item.
+        fetchSuggestions(); 
+      } else {
+        fetchSuggestions(); // Fallback to refetch
+      }
+      handleCloseReviewModal();
+    } catch (error) {
+      console.error('审核提交失败 (List):', error);
+      message.error('审核提交失败: ' + (error.response?.data?.message || error.message || '未知错误'));
+    } finally {
+      setReviewSubmitting(false);
+    }
+  };
+
 
   const columns = [
     {
@@ -330,42 +390,28 @@ const SuggestionList = () => {
             >
               查看
             </Button>
-            {isManager && currentStatus === 'PENDING_FIRST_REVIEW' && (
+            {/* Review buttons - updated to open modal */}
+            {currentStatus === 'PENDING_FIRST_REVIEW' && (isManager || isSupervisor) && (
               <Button
-                type="link"
-                icon={<EditOutlined />}
-                onClick={() => navigate(`/suggestions/${record._id}`)}
-                style={{ fontSize: '14px' }}
+                type="primary"
+                size="small"
+                icon={<CheckCircleOutlined />}
+                onClick={() => handleOpenReviewModal(record, 'first')}
               >
                 一级审核
               </Button>
             )}
-            {isSafetyAdmin && currentStatus === 'PENDING_SECOND_REVIEW' && record.type === 'SAFETY' && (
+            {currentStatus === 'PENDING_SECOND_REVIEW' && 
+              (
+                (isSafetyAdmin && (record.type === '安全管理' || record.type === 'SAFETY')) ||
+                (isOperationAdmin && record.type !== '安全管理' && record.type !== 'SAFETY') ||
+                isManager
+              ) && (
               <Button
-                type="link"
-                icon={<EditOutlined />}
-                onClick={() => navigate(`/suggestions/${record._id}`)}
-                style={{ fontSize: '14px' }}
-              >
-                二级审核
-              </Button>
-            )}
-            {isOperationAdmin && currentStatus === 'PENDING_SECOND_REVIEW' && record.type !== 'SAFETY' && (
-              <Button
-                type="link"
-                icon={<EditOutlined />}
-                onClick={() => navigate(`/suggestions/${record._id}`)}
-                style={{ fontSize: '14px' }}
-              >
-                二级审核
-              </Button>
-            )}
-            {isManager && currentStatus === 'PENDING_SECOND_REVIEW' && (
-              <Button
-                type="link"
-                icon={<EditOutlined />}
-                onClick={() => navigate(`/suggestions/${record._id}`)}
-                style={{ fontSize: '14px' }}
+                type="primary"
+                size="small"
+                icon={<CheckCircleOutlined />}
+                onClick={() => handleOpenReviewModal(record, 'second')}
               >
                 二级审核
               </Button>
@@ -376,6 +422,8 @@ const SuggestionList = () => {
     },
   ];
 
+  // Mobile columns will need similar adjustments for review buttons if they are to be shown on mobile.
+  // For brevity in this step, focusing on desktop columns. The pattern is the same.
   const mobileColumns = [
     {
       title: '标题',
@@ -448,6 +496,7 @@ const SuggestionList = () => {
               />
             </Form.Item>
           </Col>
+          {/* Filter columns remain the same */}
           <Col xs={24} sm={12} md={8} lg={6} xl={5}>
             <Form.Item style={{ width: '100%', marginBottom: isMobile ? '12px' : '20px' }} label="类型">
               <Select
@@ -516,6 +565,66 @@ const SuggestionList = () => {
         rowClassName={() => 'suggestion-row'}
         scroll={isMobile ? {} : {}}
       />
+
+      {/* Review Modal */}
+      <Modal
+        title={`${reviewActionType === 'first' ? '一级' : '二级'}审核`}
+        open={reviewModalVisible}
+        onCancel={handleCloseReviewModal}
+        footer={null}
+        bodyStyle={{ fontSize: '14px' }}
+        width={isMobile ? '95%' : 520}
+        destroyOnClose // Ensures form is reset if not explicitly done
+      >
+        <Form
+          form={reviewForm}
+          onFinish={handleReviewSubmitInList}
+          layout="vertical"
+          initialValues={{ result: 'approve' }} // Default to 'approve'
+        >
+          <Form.Item
+            name="result"
+            label="审核结果"
+            rules={[{ required: true, message: '请选择审核结果' }]}
+          >
+            <Radio.Group style={{ fontSize: '14px' }}>
+              <Radio value="approve">通过</Radio>
+              <Radio value="reject">拒绝</Radio>
+            </Radio.Group>
+          </Form.Item>
+
+          <Form.Item
+            name="comment"
+            label="审核意见"
+            rules={[{ required: true, message: '请输入审核意见' }]}
+          >
+            <Input.TextArea rows={isMobile ? 3 : 4} style={{ fontSize: '14px' }} placeholder="请输入审核意见..."/>
+          </Form.Item>
+
+          <Form.Item>
+            <Row gutter={16} justify="end">
+              <Col>
+                <Button 
+                  onClick={handleCloseReviewModal}
+                  style={{ fontSize: '14px' }}
+                >
+                  取消
+                </Button>
+              </Col>
+              <Col>
+                <Button
+                  type="primary"
+                  htmlType="submit"
+                  loading={reviewSubmitting}
+                  style={{ fontSize: '14px' }}
+                >
+                  提交
+                </Button>
+              </Col>
+            </Row>
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 };
