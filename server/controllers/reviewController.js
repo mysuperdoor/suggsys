@@ -1,3 +1,8 @@
+// DEPRECATED: This controller is not used in any active routes for the primary
+// suggestion review workflow as of November 23, 2023.
+// Review logic is handled within suggestionController.js using embedded review data.
+// This file is a candidate for future deletion.
+/*
 const { Review, REVIEW_LEVELS, REVIEW_RESULTS } = require('../models/Review');
 const { Suggestion } = require('../models/Suggestion');
 const mongoose = require('mongoose');
@@ -82,6 +87,7 @@ exports.getReviewsBySuggestion = async (req, res) => {
     res.status(500).json({ message: '服务器错误', error: error.message });
   }
 };
+*/
 
 /**
  * 获取审核人的审核记录
