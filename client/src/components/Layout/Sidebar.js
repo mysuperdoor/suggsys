@@ -15,63 +15,22 @@ import {
   PieChartOutlined,
   LineChartOutlined
 } from '@ant-design/icons';
-import { authService } from '../../services/authService';
+// import { authService } from '../../services/authService'; // Will use useAuth
+import { useAuth } from '../../context/AuthContext'; // Import useAuth
 
 const { Text } = Typography;
 
-const Sidebar = ({ role: propRole, collapsed }) => {
-  const [role, setRole] = useState(propRole || localStorage.getItem('userRole'));
-  const [currentUser, setCurrentUser] = useState(null);
+// Removed propRole as role will come from context
+const Sidebar = ({ collapsed }) => { 
+  const { user, logout: contextLogout, isAuthenticated } = useAuth(); // Get user and logout from context
   const navigate = useNavigate();
 
-  useEffect(() => {
-    // 如果props中没有role，尝试从localStorage获取
-    if (!propRole) {
-      const storedRole = localStorage.getItem('userRole');
-      if (storedRole) {
-        setRole(storedRole);
-      } else {
-        // 如果localStorage也没有，尝试从currentUser获取
-        authService.getCurrentUser().then(user => {
-          if (user && user.role) {
-            setRole(user.role);
-            localStorage.setItem('userRole', user.role);
-          }
-        }).catch(err => {
-          console.error('获取用户角色失败:', err);
-        });
-      }
-    } else if (propRole !== role) {
-      // 如果props中的role变化了，更新状态
-      setRole(propRole);
-    }
-  }, [propRole]);
-
-  // 获取当前用户信息
-  useEffect(() => {
-    const userStr = localStorage.getItem('currentUser');
-    if (userStr) {
-      try {
-        const userData = JSON.parse(userStr);
-        setCurrentUser(userData);
-      } catch (err) {
-        console.error('解析用户数据失败:', err);
-      }
-    } else {
-      // 从服务器获取用户信息
-      authService.getCurrentUser()
-        .then(user => {
-          if (user) {
-            setCurrentUser(user);
-          }
-        })
-        .catch(err => {
-          console.error('获取用户信息失败:', err);
-        });
-    }
-  }, []);
+  // Role and currentUser are now derived from the user object from context
+  const role = user?.role;
+  const currentUser = user; // The user object from context is the current user
 
   // 根据角色确定权限
+  // These checks will now use `role` derived from `user` context
   const isAdmin = role === '部门经理' || role === '安全科管理人员' || role === '运行科管理人员';
   const isDepartmentManager = role === '部门经理';
   const isSupervisor = role === '值班主任';
@@ -89,16 +48,22 @@ const Sidebar = ({ role: propRole, collapsed }) => {
   // 确定是否可以查看班组内部报表（只有值班主任可见）
   const canViewTeamInternalReport = isSupervisor;
 
-  console.log('Sidebar - 用户角色:', role);
-  console.log('Sidebar - 是否管理员:', isAdmin);
-  console.log('Sidebar - 是否部门经理:', isDepartmentManager);
-  console.log('Sidebar - 是否可以提交建议:', canSubmitSuggestion);
-  console.log('Sidebar - 是否可以查看班组内部报表:', canViewTeamInternalReport);
+  // console.log('Sidebar - 用户角色 (Context):', role);
+  // console.log('Sidebar - 是否认证 (Context):', isAuthenticated);
+
 
   const handleLogout = () => {
-    authService.logout();
-    navigate('/login');
+    contextLogout(); // Call logout from context
+    navigate('/login'); // Navigation remains here
   };
+
+  // If not authenticated or user data is not yet available, can optionally render nothing or a placeholder
+  if (!isAuthenticated || !user) {
+    // This might be too aggressive if sidebar is meant to show something for logged-out users
+    // For this app, sidebar is likely only for authenticated users.
+    // If isLoading state was in context, we could show a spinner here too.
+    return null; 
+  }
 
   return (
     <>

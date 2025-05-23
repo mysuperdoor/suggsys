@@ -1,39 +1,20 @@
-import React, { useState, useEffect } from 'react';
-import { Navigate } from 'react-router-dom';
+import React, { useContext } from 'react';
+import { Navigate, useLocation } from 'react-router-dom';
+import AuthContext from '../context/AuthContext'; // Import AuthContext
 import { message, Spin } from 'antd';
-import { authService } from '../services/authService';
 
 const AdminRoute = ({ children }) => {
-  const [loading, setLoading] = useState(true);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [error, setError] = useState(null);
+  const location = useLocation();
+  const { user, isAuthenticated, isLoading } = useContext(AuthContext);
 
-  useEffect(() => {
-    const checkAdminAccess = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        
-        // 使用新的辅助函数检查部门经理权限
-        const hasDepartmentManagerAccess = await authService.isDepartmentManager();
-        setIsAdmin(hasDepartmentManagerAccess);
-        
-        if (!hasDepartmentManagerAccess) {
-          setError('需要部门经理权限');
-        }
-      } catch (error) {
-        console.error('检查管理员权限失败:', error);
-        setIsAdmin(false);
-        setError(error.message || '检查权限失败');
-      } finally {
-        setLoading(false);
-      }
-    };
+  console.log('AdminRoute检查认证状态 (Context):', {
+    userRole: user?.role,
+    isAuthenticated,
+    isLoading,
+    currentPath: location.pathname,
+  });
 
-    checkAdminAccess();
-  }, []);
-
-  if (loading) {
+  if (isLoading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
         <Spin size="large" tip="验证权限中..." />
@@ -41,9 +22,16 @@ const AdminRoute = ({ children }) => {
     );
   }
 
-  if (error || !isAdmin) {
-    console.log('AdminRoute - 权限不足，重定向到首页');
-    message.error('需要部门经理权限');
+  if (!isAuthenticated) {
+    // Not authenticated, redirect to login
+    message.warning('请先登录再访问此页面。');
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  // Check for '部门经理' role
+  if (user?.role !== '部门经理') {
+    console.log('AdminRoute - 权限不足 (非部门经理)，重定向到首页');
+    message.error('需要部门经理权限才能访问此页面。');
     return <Navigate to="/" replace />;
   }
 

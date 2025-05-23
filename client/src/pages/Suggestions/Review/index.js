@@ -178,16 +178,30 @@ const ReviewList = () => {
       setReviewModalVisible(false);
       reviewForm.resetFields();
       
-      // 立即刷新列表
-      fetchPendingReviews();
+      const response = await suggestionService.submitReview(reviewData); // Get the response
+      message.success('审核提交成功');
+      setReviewModalVisible(false);
+      reviewForm.resetFields();
       
-      // 2秒后再次刷新，确保状态更新完全同步
-      setTimeout(() => {
+      // Update local state immediately
+      if (response && response.suggestion) {
+        const updatedSuggestionId = response.suggestion._id;
+        setPendingReviews(prevReviews => prevReviews.filter(s => s._id !== updatedSuggestionId));
+      } else {
+        // Fallback to refetch if updated suggestion isn't returned as expected
         fetchPendingReviews();
-      }, 2000);
+      }
+      
+      // Optional: Keep a delayed sync for eventual consistency if desired,
+      // or remove it if local update is deemed sufficient.
+      // For this task, we'll keep it as per the plan.
+      setTimeout(() => {
+        console.log('Delayed sync: Re-fetching reviews.');
+        fetchPendingReviews();
+      }, 5000); // Increased delay to make immediate local update more noticeable
     } catch (error) {
       console.error('审核提交失败:', error);
-      message.error('审核提交失败' + (error.response?.data?.message || ''));
+      message.error('审核提交失败: ' + (error.response?.data?.message || error.message || '未知错误'));
     }
   };
 

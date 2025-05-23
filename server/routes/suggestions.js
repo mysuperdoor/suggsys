@@ -21,14 +21,21 @@ const {
 } = require('../middleware/admin');
 
 // 配置文件上传
+const tempUploadDir = path.join(__dirname, '../uploads_temp');
+if (!fs.existsSync(tempUploadDir)) {
+  fs.mkdirSync(tempUploadDir, { recursive: true });
+  console.log('Created temporary upload directory:', tempUploadDir);
+}
+
+const finalUploadDir = path.join(__dirname, '../uploads');
+if (!fs.existsSync(finalUploadDir)) {
+  fs.mkdirSync(finalUploadDir, { recursive: true });
+  console.log('Created final upload directory:', finalUploadDir);
+}
+
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    const uploadDir = path.join(__dirname, '../uploads');
-    // 确保上传目录存在
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    cb(null, uploadDir);
+    cb(null, tempUploadDir); // Save to temporary directory first
   },
   filename: function (req, file, cb) {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
@@ -247,20 +254,22 @@ router.post('/upload', auth, upload.single('file'), (req, res) => {
 });
 
 // @route   PUT api/suggestions/:id/status
-// @desc    更新建议状态
+// @desc    更新建议状态 (DEPRECATED - Use specific review or implementation routes)
 // @access  Private (管理人员及以上)
+/*
 router.put(
   '/:id/status',
   [
     auth,
     [
       check('status', '状态不能为空').not().isEmpty(),
-      check('status', '无效的状态').isIn(['待审核', '已通过', '已拒绝', '处理中', '已完成']),
+      check('status', '无效的状态').isIn(['待审核', '已通过', '已拒绝', '处理中', '已完成']), // These are mixed statuses
       check('comment', '审核意见不能为空').not().isEmpty()
     ]
   ],
   suggestionController.updateSuggestionStatus
 );
+*/
 
 // @route   POST api/suggestions/:id/comments
 // @desc    添加评论

@@ -1,15 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext } from 'react'; // Added useContext
 import { Layout as AntLayout, Button, Drawer } from 'antd';
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import { MenuUnfoldOutlined, MenuFoldOutlined } from '@ant-design/icons';
+import AuthContext from '../../context/AuthContext'; // Import AuthContext
 
 const { Content, Sider, Header } = AntLayout;
 
 const Layout = () => {
-  // 从localStorage获取用户信息
-  const userRole = localStorage.getItem('userRole');
-  
+  const { user, isLoading } = useContext(AuthContext); // Get user from context
+  const userRole = user?.role; // Get role from user object in context
+
   // 添加状态管理侧边栏折叠
   const [collapsed, setCollapsed] = useState(false);
   // 检测是否为移动设备
@@ -38,6 +39,12 @@ const Layout = () => {
   }, []);
 
   // 切换侧边栏显示状态
+  // While context is loading, we might not want to render the full layout,
+  // or pass potentially undefined user data down.
+  // However, PrivateRoute should already handle the main isLoading state.
+  // If user is null (e.g. after logout, before redirect), Sidebar might not render correctly.
+  // Sidebar itself now handles null user from context.
+
   const toggleCollapsed = () => {
     console.log('切换侧边栏状态，当前:', collapsed, '将变为:', !collapsed);
     setCollapsed(!collapsed);
