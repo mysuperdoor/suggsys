@@ -212,6 +212,7 @@ SuggestionSchema.index({ implementationStatus: 1 });
 SuggestionSchema.index({ type: 1 });
 SuggestionSchema.index({ team: 1 });
 SuggestionSchema.index({ createdAt: -1 });
+SuggestionSchema.index({ title: 1 }, { background: true }); // Index for sorting by title
 
 // 新增复合索引和嵌套字段索引 (基于业务场景优化)
 SuggestionSchema.index({ team: 1, reviewStatus: 1 }, { background: true });

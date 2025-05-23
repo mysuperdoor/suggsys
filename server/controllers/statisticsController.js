@@ -1,6 +1,7 @@
 const { Suggestion } = require('../models/Suggestion');
 const { User } = require('../models/User');
 const mongoose = require('mongoose');
+const { REVIEW_STATUS, IMPLEMENTATION_STATUS, SUGGESTION_TYPES } = require('../../client/src/constants/suggestions');
 
 // 获取部门统计数据
 exports.getDepartmentStats = async (req, res) => {
@@ -30,20 +31,12 @@ exports.getDepartmentStats = async (req, res) => {
                     totalSubmissions: { $sum: 1 },
                     approvedCount: {
                         $sum: {
-                            $cond: [
-                                { $in: ['$status', ['已批准', '已通过', '实施中', '已完成']] },
-                                1,
-                                0
-                            ]
+                            $cond: [ { $eq: ['$reviewStatus', REVIEW_STATUS.APPROVED] }, 1, 0 ]
                         }
                     },
                     implementedCount: {
                         $sum: {
-                            $cond: [
-                                { $in: ['$status', ['已完成']] },
-                                1,
-                                0
-                            ]
+                            $cond: [ { $eq: ['$implementationStatus', IMPLEMENTATION_STATUS.COMPLETED] }, 1, 0 ]
                         }
                     },
                     totalScore: { $sum: '$score' },
@@ -164,20 +157,12 @@ exports.getTeamInternalStats = async (req, res) => {
                     totalSubmissions: { $sum: 1 },
                     approvedCount: {
                         $sum: {
-                            $cond: [
-                                { $in: ['$status', ['已批准', '已通过', '实施中', '已完成']] },
-                                1,
-                                0
-                            ]
+                            $cond: [ { $eq: ['$reviewStatus', REVIEW_STATUS.APPROVED] }, 1, 0 ]
                         }
                     },
                     implementedCount: {
                         $sum: {
-                            $cond: [
-                                { $in: ['$status', ['已完成']] },
-                                1,
-                                0
-                            ]
+                            $cond: [ { $eq: ['$implementationStatus', IMPLEMENTATION_STATUS.COMPLETED] }, 1, 0 ]
                         }
                     },
                     totalScore: { $sum: { $ifNull: ['$score', 0] } }
@@ -309,11 +294,7 @@ exports.getDepartmentTrends = async (req, res) => {
                     count: { $sum: 1 },
                     approvedCount: {
                         $sum: {
-                            $cond: [
-                                { $in: ['$status', ['已批准', '已通过', '实施中', '已完成']] },
-                                1,
-                                0
-                            ]
+                            $cond: [ { $eq: ['$reviewStatus', REVIEW_STATUS.APPROVED] }, 1, 0 ]
                         }
                     }
                 }
