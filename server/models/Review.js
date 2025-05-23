@@ -1,3 +1,7 @@
+// DEPRECATED: This model is not used in the primary suggestion review workflow
+// as of November 23, 2023. The embedded review fields in Suggestion.js are used instead.
+// This file is a candidate for future deletion.
+/*
 const mongoose = require('mongoose');
 
 // 审核级别枚举
@@ -72,3 +76,4 @@ module.exports = {
   REVIEW_LEVELS,
   REVIEW_RESULTS
 }; 
+*/

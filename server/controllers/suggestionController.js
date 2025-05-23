@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { validationResult } = require('express-validator');
 const { validateSuggestion } = require('../utils/validation');
-const { Review, REVIEW_LEVELS, REVIEW_RESULTS } = require('../models/Review');
+// const { Review, REVIEW_LEVELS, REVIEW_RESULTS } = require('../models/Review'); // DEPRECATED, model file is commented out
 const { notifyReviewers } = require('../utils/notificationUtils');
 // 导入前端定义的常量
 const { IMPLEMENTATION_STATUS, SUGGESTION_TYPES } = require('../../client/src/constants/suggestions'); // Added SUGGESTION_TYPES
