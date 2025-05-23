@@ -1734,9 +1734,12 @@ exports.firstReview = async (req, res) => {
       return res.status(400).json({ message: '建议不处于待一级审核状态', currentStatus: suggestion.reviewStatus });
     }
 
-    // 检查权限（值班主任只能审核自己班组的建议）
-    if (req.user.role === '值班主任' && req.user.team !== suggestion.team) {
-      return res.status(403).json({ message: '只能审核自己班组的建议' });
+    // 检查权限：允许部门经理 或 值班主任（自己班组的建议）
+    const isDepartmentManager = req.user.role === '部门经理';
+    const isShiftSupervisorForTeam = req.user.role === '值班主任' && req.user.team === suggestion.team;
+
+    if (!(isDepartmentManager || isShiftSupervisorForTeam)) {
+      return res.status(403).json({ message: '无一级审核权限' });
     }
 
     // 创建审核记录
