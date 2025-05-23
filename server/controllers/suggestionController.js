@@ -8,7 +8,7 @@ const { validateSuggestion } = require('../utils/validation');
 const { Review, REVIEW_LEVELS, REVIEW_RESULTS } = require('../models/Review');
 const { notifyReviewers } = require('../utils/notificationUtils');
 // 导入前端定义的常量
-const { IMPLEMENTATION_STATUS } = require('../../client/src/constants/suggestions');
+const { IMPLEMENTATION_STATUS, SUGGESTION_TYPES } = require('../../client/src/constants/suggestions'); // Added SUGGESTION_TYPES
 const Logger = require('../utils/logger');
 
 const logger = new Logger('SuggestionController');
@@ -745,63 +745,192 @@ exports.getPendingReviewSuggestions = async (req, res) => {
 // 创建新建议
 exports.createSuggestion = async (req, res) => {
   try {
+    logger.debug('建议提交 - 请求体:', req.body);
+    logger.debug('建议提交 - 上传文件:', req.files ? req.files.length : 0);
+
     // 检查用户权限 - 运行科和安全科管理人员不允许提交建议
+    // This check was present in the old createSuggestion, but not in the route handler.
+    // For equivalence with the *original route handler*, this specific check should be removed.
+    // However, if this is a desired business rule, it should be consistently applied.
+    // For this refactoring task, I will mirror the original route handler's logic.
+    /*
     if (req.user && (req.user.role === '运行科管理人员' || req.user.role === '安全科管理人员')) {
+      // If files were uploaded, they should be cleaned up
+      if (req.files && req.files.length > 0) {
+        req.files.forEach(file => {
+          fs.unlink(file.path, err => {
+            if (err) logger.error('删除文件失败 (权限不足):', err);
+          });
+        });
+      }
       return res.status(403).json({
-        success: false,
+        success: false, // Assuming a consistent error response structure
         message: '运行科和安全科管理人员暂时无法提交建议'
       });
     }
-    
-    const { title, type, content, expectedBenefit } = req.body;
-    
-    // 验证必填字段
-    if (!title || !type || !content) {
-      return res.status(400).json({
-        success: false,
-        message: '标题、类型和内容为必填项'
-      });
+    */
+
+    // 确保上传目录存在 (Multer usually handles this, but good for robustness)
+    const uploadDir = path.join(__dirname, '../uploads');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+      logger.info('创建上传目录:', uploadDir);
     }
-    
-    // 创建建议对象
+
+    // 手动验证请求数据 (mirroring the logic from the route)
+    const errors = [];
+    if (!req.body.title) {
+      errors.push({ msg: '标题不能为空' });
+    } else if (req.body.title.length > 100) {
+      errors.push({ msg: '标题不能超过100个字符' });
+    }
+    if (!req.body.type) {
+      errors.push({ msg: '请选择有效的建议类型' });
+    } else if (!Object.keys(SUGGESTION_TYPES).includes(req.body.type)) {
+      errors.push({ msg: '建议类型无效' });
+    }
+    if (!req.body.content) {
+      errors.push({ msg: '内容不能为空' });
+    } else if (req.body.content.length < 20) {
+      errors.push({ msg: '内容不能少于20个字符' });
+    }
+    if (!req.body.expectedBenefit) {
+      errors.push({ msg: '预期效果不能为空' }); // Original message was "预期效果不能为空"
+    }
+
+    if (errors.length > 0) {
+      if (req.files && req.files.length > 0) {
+        req.files.forEach(file => {
+          fs.unlink(file.path, err => {
+            if (err) logger.error('删除文件失败 (验证错误):', err);
+          });
+        });
+      }
+      // Original route returned: { message: errors[0].msg, errors: errors }
+      // For consistency with other error responses, using 'message' for the primary error.
+      return res.status(400).json({ message: errors[0].msg, errors: errors });
+    }
+
+    const { title, type, content, expectedBenefit } = req.body;
+
+    // Files are in req.files, uploaded to temp directory.
+    // Process file metadata first, but don't move them yet.
+    let attachmentMetadata = [];
+    if (req.files && req.files.length > 0) {
+      attachmentMetadata = req.files.map(file => {
+        const safeOriginalname = Buffer.from(file.originalname, 'latin1').toString('utf8');
+        return {
+          filename: file.filename, // This is the unique name given by Multer
+          originalname: safeOriginalname,
+          mimetype: file.mimetype,
+          size: file.size,
+          // Store temporary path for cleanup/move operations
+          tempPath: file.path 
+        };
+      });
+      logger.debug('Initial attachment metadata:', attachmentMetadata);
+    }
+
+    // If validation passed, now move files from temp to final directory
+    const finalUploadDir = path.join(__dirname, '../uploads');
+    const movedFiles = []; // To keep track of successfully moved files for potential rollback
+
+    try {
+      for (const fileMeta of attachmentMetadata) {
+        const sourcePath = fileMeta.tempPath;
+        const targetPath = path.join(finalUploadDir, fileMeta.filename);
+        
+        // Ensure final upload directory exists (it should from routes/suggestions.js, but good to double check)
+        if (!fs.existsSync(finalUploadDir)) {
+          fs.mkdirSync(finalUploadDir, { recursive: true });
+        }
+
+        await fs.promises.rename(sourcePath, targetPath);
+        logger.debug(`Moved file from ${sourcePath} to ${targetPath}`);
+        movedFiles.push(targetPath); // Add to moved files list
+        // No need to update fileMeta.path as the schema doesn't store full path, only filename
+      }
+    } catch (moveError) {
+      logger.error('Error moving files to final directory:', moveError);
+      // Rollback: Delete already moved files
+      for (const movedFilePath of movedFiles) {
+        try {
+          await fs.promises.unlink(movedFilePath);
+          logger.debug(`Rolled back (deleted) moved file: ${movedFilePath}`);
+        } catch (unlinkError) {
+          logger.error(`Error rolling back (deleting) moved file ${movedFilePath}:`, unlinkError);
+        }
+      }
+      // Delete remaining temp files for this request
+      for (const fileMeta of attachmentMetadata) {
+        if (fs.existsSync(fileMeta.tempPath)) { // Check if it wasn't moved and deleted
+          try {
+            await fs.promises.unlink(fileMeta.tempPath);
+            logger.debug(`Cleaned up temp file after move error: ${fileMeta.tempPath}`);
+          } catch (cleanupError) {
+            logger.error(`Error cleaning up temp file ${fileMeta.tempPath} after move error:`, cleanupError);
+          }
+        }
+      }
+      return res.status(500).json({ message: 'Error processing attachments.', error: moveError.message });
+    }
+
+    // Prepare attachments for saving to DB (without tempPath)
+    const attachmentsToSave = attachmentMetadata.map(meta => ({
+      filename: meta.filename,
+      originalname: meta.originalname,
+      mimetype: meta.mimetype,
+      size: meta.size
+    }));
+
     const suggestion = new Suggestion({
       title,
       type,
       content,
       expectedBenefit,
-      submitter: req.user._id,
-      team: req.user.team
+      submitter: req.user.id, 
+      team: req.user.team,   
+      attachments: attachmentsToSave // Save metadata without tempPath
     });
-    
-    // 处理附件上传
-    if (req.files && req.files.length > 0) {
-      suggestion.attachments = req.files.map(file => ({
-        filename: file.filename,
-        path: file.path,
-        originalname: file.originalname,
-        mimetype: file.mimetype,
-        size: file.size
-      }));
-    }
-    
-    // 保存建议
+
+    logger.debug('准备保存建议 (after file move):', JSON.stringify(suggestion, null, 2));
     await suggestion.save();
+    logger.info('建议保存成功，ID:', suggestion._id);
+
+    // Populate submitter info for the response
+    await suggestion.populate('submitter', 'name team');
     
-    // 返回成功响应
-    res.status(201).json({
-      success: true,
-      message: '建议提交成功',
-      suggestion
+    logger.debug('返回建议数据:', JSON.stringify(suggestion, null, 2));
+    // Original route returned: { message: '建议提交成功', suggestion }
+    res.status(201).json({ 
+      message: '建议提交成功', 
+      suggestion 
     });
+
   } catch (error) {
-    logger.error('创建建议失败:', error);
-    res.status(500).json({
-      success: false,
-      message: '服务器错误，建议提交失败',
-      error: error.message
+    // If save to DB fails, we need to delete the files that were successfully moved to the final directory.
+    // Temp files should have been cleaned up or moved already.
+    if (req.files && req.files.length > 0) { // This check might be redundant if attachmentMetadata is used
+      // Delete files from the *final* directory
+      attachmentMetadata.forEach(fileMeta => {
+        const finalPath = path.join(finalUploadDir, fileMeta.filename);
+        if (fs.existsSync(finalPath)) { // Check if it was actually moved
+          fs.unlink(finalPath, err => {
+            if (err) logger.error(`删除最终文件失败 (DB保存错误) ${finalPath}:`, err);
+            else logger.debug(`已删除最终文件 (DB保存错误) ${finalPath}`);
+          });
+        }
+      });
+    }
+    logger.error('提交建议失败 (Controller - DB Save Error):', error);
+    // Original route returned: { message: '提交建议失败', error: error.message }
+    res.status(500).json({ 
+      message: '提交建议失败', 
+      error: error.message 
     });
   }
 };
+
 
 // 更新建议
 exports.updateSuggestion = async (req, res) => {
@@ -1289,22 +1418,22 @@ exports.submitReview = async (req, res) => {
       suggestion.firstReview = review;
       if (result === 'approve') {
         suggestion.reviewStatus = 'PENDING_SECOND_REVIEW';
-        suggestion.status = 'PENDING_SECOND_REVIEW'; // 同时更新status字段
+        // suggestion.status = 'PENDING_SECOND_REVIEW'; // REMOVED old status field update
       } else {
         suggestion.reviewStatus = 'REJECTED';
-        suggestion.status = 'REJECTED'; // 同时更新status字段
+        // suggestion.status = 'REJECTED'; // REMOVED old status field update
       }
     } else if (reviewType === 'second') {
       suggestion.secondReview = review;
       if (result === 'approve') {
         suggestion.reviewStatus = 'APPROVED';
-        suggestion.status = 'NOT_IMPLEMENTED'; // 同时更新status字段
-        // 初始化实施状态
-        suggestion.implementationStatus = 'NOT_STARTED';
+        // suggestion.status = 'NOT_IMPLEMENTED'; // REMOVED old status field update
+        // Initialize implementation status
+        suggestion.implementationStatus = IMPLEMENTATION_STATUS.NOT_STARTED; // Using constant
         suggestion.implementation = {
-          status: 'NOT_STARTED',
+          status: IMPLEMENTATION_STATUS.NOT_STARTED, // Using constant
           history: [{
-            status: 'NOT_STARTED',
+            status: IMPLEMENTATION_STATUS.NOT_STARTED, // Using constant
             updatedBy: req.user.id,
             date: new Date(),
             notes: '建议已通过二级审核，等待实施'
@@ -1312,14 +1441,15 @@ exports.submitReview = async (req, res) => {
         };
       } else {
         suggestion.reviewStatus = 'REJECTED';
-        suggestion.status = 'REJECTED'; // 同时更新status字段
+        // suggestion.status = 'REJECTED'; // REMOVED old status field update
       }
     }
     
     logger.debug('即将保存的建议:', {
       id: suggestion._id,
-      newStatus: suggestion.status,
-      newReviewStatus: suggestion.reviewStatus
+      // newStatus: suggestion.status, // REMOVED old status field from log
+      newReviewStatus: suggestion.reviewStatus,
+      newImplementationStatus: suggestion.implementationStatus
     });
     
     await suggestion.save();
@@ -1578,8 +1708,9 @@ exports.firstReview = async (req, res) => {
     }
 
     // 检查建议是否处于待一级审核状态
-    if (suggestion.status !== 'PENDING_FIRST_REVIEW') {
-      return res.status(400).json({ message: '建议不处于待一级审核状态' });
+    // Using reviewStatus for the check now
+    if (suggestion.reviewStatus !== REVIEW_STATUS.PENDING_FIRST_REVIEW) {
+      return res.status(400).json({ message: '建议不处于待一级审核状态', currentStatus: suggestion.reviewStatus });
     }
 
     // 检查权限（值班主任只能审核自己班组的建议）
@@ -1599,11 +1730,11 @@ exports.firstReview = async (req, res) => {
     suggestion.firstReview = review;
     
     if (approved === 'approve') {
-      suggestion.status = 'PENDING_SECOND_REVIEW';
-      suggestion.reviewStatus = 'PENDING_SECOND_REVIEW'; // 同时更新reviewStatus字段
+      // suggestion.status = 'PENDING_SECOND_REVIEW'; // REMOVED old status field update
+      suggestion.reviewStatus = REVIEW_STATUS.PENDING_SECOND_REVIEW; // Using constant
     } else {
-      suggestion.status = 'REJECTED';
-      suggestion.reviewStatus = 'REJECTED'; // 同时更新reviewStatus字段
+      // suggestion.status = 'REJECTED'; // REMOVED old status field update
+      suggestion.reviewStatus = REVIEW_STATUS.REJECTED; // Using constant
     }
 
     await suggestion.save();
@@ -1647,8 +1778,9 @@ exports.secondReview = async (req, res) => {
     }
 
     // 检查建议是否处于待二级审核状态
-    if (suggestion.status !== 'PENDING_SECOND_REVIEW') {
-      return res.status(400).json({ message: '建议不处于待二级审核状态' });
+    // Using reviewStatus for the check now
+    if (suggestion.reviewStatus !== REVIEW_STATUS.PENDING_SECOND_REVIEW) {
+      return res.status(400).json({ message: '建议不处于待二级审核状态', currentStatus: suggestion.reviewStatus });
     }
 
     // 检查权限
@@ -1672,23 +1804,23 @@ exports.secondReview = async (req, res) => {
     suggestion.secondReview = review;
     
     if (approved === 'approve') {
-      suggestion.status = 'NOT_IMPLEMENTED'; // 或者之前使用的 'APPROVED'
-      suggestion.reviewStatus = 'APPROVED'; // 同时更新reviewStatus字段
+      // suggestion.status = 'NOT_IMPLEMENTED'; // REMOVED old status field update
+      suggestion.reviewStatus = REVIEW_STATUS.APPROVED; // Using constant
       
-      // 初始化实施状态
-      suggestion.implementationStatus = 'NOT_STARTED';
+      // Initialize implementation status
+      suggestion.implementationStatus = IMPLEMENTATION_STATUS.NOT_STARTED; // Using constant
       suggestion.implementation = {
-        status: 'NOT_STARTED',
+        status: IMPLEMENTATION_STATUS.NOT_STARTED, // Using constant
         history: [{
-          status: 'NOT_STARTED',
+          status: IMPLEMENTATION_STATUS.NOT_STARTED, // Using constant
           updatedBy: req.user.id,
           date: new Date(),
           notes: '建议已通过二级审核，等待实施'
         }]
       };
     } else {
-      suggestion.status = 'REJECTED';
-      suggestion.reviewStatus = 'REJECTED'; // 同时更新reviewStatus字段
+      // suggestion.status = 'REJECTED'; // REMOVED old status field update
+      suggestion.reviewStatus = REVIEW_STATUS.REJECTED; // Using constant
     }
 
     await suggestion.save();

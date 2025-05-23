@@ -1,12 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext } from 'react'; // Added useContext
 import { Form, Input, Button, Card, message } from 'antd';
 import { UserOutlined, LockOutlined } from '@ant-design/icons';
-import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import { useNavigate, useLocation } from 'react-router-dom'; // Added useLocation
+// Removed direct axios import, will use authService via context
+import AuthContext from '../../context/AuthContext'; // Import AuthContext
 
 const Login = () => {
   const navigate = useNavigate();
+  const location = useLocation(); // For redirecting after login
   const [loading, setLoading] = useState(false);
+  const { login: contextLogin } = useContext(AuthContext); // Get login from context
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
 
   // 监听窗口大小变化
@@ -24,20 +27,22 @@ const Login = () => {
   const onFinish = async (values) => {
     try {
       setLoading(true);
-      const response = await axios.post('/auth/login', values);
-      const { token, user } = response.data;
+      // Call the login function from AuthContext
+      const loggedInUser = await contextLogin(values.username, values.password); 
       
-      // 存储用户信息
-      localStorage.setItem('token', token);
-      localStorage.setItem('userId', user.id);
-      localStorage.setItem('userRole', user.role);
-      localStorage.setItem('userName', user.name);
-      localStorage.setItem('userTeam', user.team);
-
-      message.success('登录成功');
-      navigate('/dashboard');
+      if (loggedInUser) {
+        message.success('登录成功');
+        // Redirect to the page the user was trying to access, or dashboard
+        const from = location.state?.from?.pathname || '/dashboard';
+        navigate(from, { replace: true });
+      } else {
+        // This case might not be reached if contextLogin throws an error handled below
+        message.error('登录失败，请检查您的凭据');
+      }
     } catch (error) {
-      message.error(error.response?.data?.msg || '登录失败');
+      // Error object structure might vary depending on how authService and context re-throw it.
+      // Assuming error.response.data.msg or error.message for now.
+      message.error(error.response?.data?.message || error.response?.data?.msg || error.message || '登录失败');
     } finally {
       setLoading(false);
     }

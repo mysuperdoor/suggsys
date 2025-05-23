@@ -101,29 +101,31 @@ const SuggestionSchema = new Schema({
     required: true,
     // ref: 'User.team' // ref 通常指向模型名
   },
+  // The 'status' field is being deprecated. It was used dynamically and not explicitly defined in the schema.
+  // Logic should now rely on reviewStatus and implementationStatus.
   reviewStatus: {
     type: String,
     enum: {
-        values: Object.keys(REVIEW_STATUS), // 使用导入的 REVIEW_STATUS
-        message: '无效的审核状态'
+        values: Object.keys(REVIEW_STATUS), 
+        message: '无效的审核状态. Valid values are: ' + Object.keys(REVIEW_STATUS).join(', ')
     },
     default: 'PENDING_FIRST_REVIEW'
   },
-  implementationStatus: { // 顶层实施状态，可能与 implementation.status 同步
+  implementationStatus: { 
     type: String,
     enum: {
-        values: Object.keys(IMPLEMENTATION_STATUS), // 使用导入的 IMPLEMENTATION_STATUS
-        message: '无效的实施状态'
+        values: Object.keys(IMPLEMENTATION_STATUS), 
+        message: '无效的实施状态. Valid values are: ' + Object.keys(IMPLEMENTATION_STATUS).join(', ')
     },
     default: 'NOT_STARTED'
   },
-  implementation: { // 考虑是否将实施信息独立为一个模型 (Implementation) 并用 ref 关联
-    status: {
+  implementation: { 
+    status: { // This is the detailed status for the implementation phase itself
       type: String,
-      enum: Object.keys(IMPLEMENTATION_STATUS), // 使用导入的 IMPLEMENTATION_STATUS
+      enum: Object.keys(IMPLEMENTATION_STATUS), 
       default: 'NOT_STARTED'
     },
-    responsiblePerson: { // 考虑使用 ObjectId ref: 'User'
+    responsiblePerson: { 
         type: String
     },
     startDate: Date,

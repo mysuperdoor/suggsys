@@ -20,7 +20,7 @@ const { Option } = Select;
 
 const NewSuggestion = () => {
   const [form] = Form.useForm();
-  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false); // Renamed from loading for clarity
   const [fileList, setFileList] = useState([]);
   const [suggestionTypes, setSuggestionTypes] = useState([]);
   const [initializing, setInitializing] = useState(true);
@@ -105,8 +105,30 @@ const NewSuggestion = () => {
   }, []);
 
   // 处理文件上传
-  const handleFileChange = ({ fileList }) => {
-    setFileList(fileList);
+  // File handling similar to CreateSuggestion.js
+  const uploadProps = {
+    onRemove: (file) => {
+      const index = fileList.indexOf(file);
+      const newFileList = fileList.slice();
+      newFileList.splice(index, 1);
+      setFileList(newFileList);
+    },
+    beforeUpload: (file) => {
+      // Limit file size (10MB)
+      const isLt10M = file.size / 1024 / 1024 < 10;
+      if (!isLt10M) {
+        message.error('文件不能超过10MB!');
+        return Upload.LIST_IGNORE; // Prevent adding to list
+      }
+      // Limit file count
+      if (fileList.length >= 5) {
+        message.error('最多只能上传5个文件');
+        return Upload.LIST_IGNORE;
+      }
+      setFileList(prevList => [...prevList, file]);
+      return false; // Prevent auto-upload, manage manually
+    },
+    fileList, // Controlled component
   };
 
   // 处理表单提交
@@ -116,44 +138,66 @@ const NewSuggestion = () => {
       message.error('您没有提交建议的权限');
       return;
     }
+
+    if (fileList.length > 5) {
+      message.error('最多只能上传5个文件'); // Double check, though beforeUpload should prevent
+      return;
+    }
     
     try {
-      setLoading(true);
+      setSubmitting(true);
       console.log('提交的表单值:', values);
       
-      // 创建FormData对象
       const formData = new FormData();
       
-      // 添加文件
+      // Add form fields - ensure all values are strings, similar to CreateSuggestion.js
+      formData.append('title', String(values.title || ''));
+      formData.append('type', String(values.type || ''));
+      formData.append('content', String(values.content || ''));
+      formData.append('expectedBenefit', String(values.expectedBenefit || ''));
+      
+      // Add files - New.js used originFileObj, CreateSuggestion.js used file directly.
+      // Assuming files in fileList are actual File objects from AntD's Upload component after beforeUpload
       fileList.forEach((file, index) => {
-        if (file.originFileObj) {
-          console.log(`添加文件 ${index}:`, file.name);
-          formData.append('files', file.originFileObj);
-        }
+        // Ant Design's Upload component adds the actual file to `originFileObj`
+        // when `beforeUpload` returns false. If the file object itself is the File, use that.
+        const fileToAdd = file.originFileObj || file;
+        console.log(`添加文件 ${index}:`, fileToAdd.name);
+        formData.append('files', fileToAdd);
       });
 
-      // 添加其他表单数据
-      Object.keys(values).forEach(key => {
-        console.log(`添加字段 ${key}:`, values[key]);
-        formData.append(key, values[key]);
-      });
+      // Debug FormData content
+      // for (let pair of formData.entries()) {
+      //   console.log(pair[0] + ': ' + (pair[1] instanceof File ? pair[1].name : pair[1]));
+      // }
 
-      // 打印FormData内容（仅用于调试）
-      for (let pair of formData.entries()) {
-        console.log(pair[0] + ': ' + (pair[1] instanceof File ? pair[1].name : pair[1]));
-      }
-
-      // 提交建议
       const response = await suggestionService.submitSuggestion(formData);
       
       console.log('提交成功，响应:', response);
       message.success('建议提交成功！');
+      form.resetFields(); // Reset form on success
+      setFileList([]); // Clear file list on success
       navigate('/suggestions/list');
     } catch (error) {
-      console.error('提交建议失败:', error);
-      message.error(`提交失败: ${error.response?.data?.message || error.message || '请重试'}`);
+      console.error('提交失败:', error);
+      // Enhanced error reporting from CreateSuggestion.js
+      if (error.response) {
+        console.error('错误响应数据:', error.response.data);
+        if (error.response.data.errors && Array.isArray(error.response.data.errors)) {
+          const errorMessages = error.response.data.errors.map(err => err.msg).join(', ');
+          message.error(`提交失败: ${errorMessages}`);
+        } else if (error.response.data.message) {
+          message.error(`提交失败: ${error.response.data.message}`);
+        } else {
+          message.error('提交失败，请检查表单数据是否符合要求');
+        }
+      } else if (error.request) {
+        message.error('服务器无响应，请检查网络连接');
+      } else {
+        message.error(`请求错误: ${error.message}`);
+      }
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
@@ -180,11 +224,15 @@ const NewSuggestion = () => {
           onFinish={handleSubmit}
           disabled={initializing || isRestrictedUser}
           style={{ width: '100%' }}
+          initialValues={{ type: 'SAFETY' }} // Added from CreateSuggestion.js
         >
           <Form.Item
             name="title"
             label="建议标题"
-            rules={[{ required: true, message: '请输入建议标题' }]}
+            rules={[
+              { required: true, message: '请输入建议标题' },
+              { max: 100, message: '标题不能超过100个字符' } // Added from CreateSuggestion.js
+            ]}
           >
             <Input placeholder="请输入建议标题" maxLength={100} />
           </Form.Item>
@@ -206,12 +254,15 @@ const NewSuggestion = () => {
           <Form.Item
             name="content"
             label="建议内容"
-            rules={[{ required: true, message: '请输入建议内容' }]}
+            rules={[
+              { required: true, message: '请输入建议内容' },
+              { min: 20, message: '内容不能少于20个字符' } // Added from CreateSuggestion.js
+            ]}
           >
             <TextArea
-              placeholder="请详细描述您的建议..."
-              rows={isMobile ? 4 : 6}
-              maxLength={2000}
+              placeholder="请详细描述您的合理化建议（不少于20个字符）..." // Text from CreateSuggestion
+              rows={isMobile ? 4 : 6} // Kept responsive rows from New.js
+              maxLength={2000} // Kept from New.js (CreateSuggestion had no explicit maxLength for content)
               showCount
             />
           </Form.Item>
@@ -219,26 +270,22 @@ const NewSuggestion = () => {
           <Form.Item
             name="expectedBenefit"
             label="预期效益"
-            rules={[{ required: true, message: '请描述预期效益' }]}
+            rules={[{ required: true, message: '请描述预期效益' }]} // Kept rule from New.js
           >
             <TextArea
-              placeholder="请描述实施该建议可能带来的效益..."
-              rows={isMobile ? 3 : 4}
-              maxLength={1000}
+              placeholder="请描述实施该建议后的预期效益..." // Text from CreateSuggestion
+              rows={isMobile ? 3 : 4} // Kept responsive rows from New.js
+              maxLength={1000} // Kept from New.js (CreateSuggestion had no explicit maxLength here)
               showCount
             />
           </Form.Item>
 
           <Form.Item
-            label="附件"
-            extra="支持 jpg、png、pdf 格式文件，单个文件不超过10MB"
+            label="附件上传" // Label from CreateSuggestion
+            name="attachments" // Added name to Form.Item for consistency, though Upload is not directly a form input
+            extra="支持JPG、PNG、PDF、DOCX等格式文件，单个文件不超过10MB，最多上传5个文件" // More detailed extra text from CreateSuggestion
           >
-            <Upload
-              fileList={fileList}
-              onChange={handleFileChange}
-              beforeUpload={() => false}
-              maxCount={5}
-            >
+            <Upload {...uploadProps} > {/* Using merged uploadProps */}
               <Button icon={<UploadOutlined />} disabled={isRestrictedUser}>选择文件</Button>
             </Upload>
           </Form.Item>
@@ -252,14 +299,14 @@ const NewSuggestion = () => {
               <Button 
                 type="primary" 
                 htmlType="submit" 
-                loading={loading} 
+                loading={submitting} // Changed from loading
                 disabled={isRestrictedUser}
                 style={{ width: isMobile ? '100%' : 'auto' }}
               >
                 提交建议
               </Button>
               <Button 
-                onClick={() => navigate('/suggestions/list')}
+                onClick={() => navigate('/suggestions/list')} // Kept navigation from New.js
                 style={{ width: isMobile ? '100%' : 'auto' }}
               >
                 取消

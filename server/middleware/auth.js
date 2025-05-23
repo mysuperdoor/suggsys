@@ -16,7 +16,7 @@ module.exports = async function(req, res, next) {
     // 验证token
     const decoded = jwt.verify(
       token.replace('Bearer ', ''),
-      process.env.JWT_SECRET || 'defaultsecretkey'
+      process.env.JWT_SECRET // Removed fallback 'defaultsecretkey'
     );
 
     // 检查token是否过期

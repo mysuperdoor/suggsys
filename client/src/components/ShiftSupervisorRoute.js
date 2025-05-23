@@ -1,46 +1,19 @@
-import React, { useState, useEffect } from 'react';
-import { Navigate } from 'react-router-dom';
+import React, { useContext } from 'react';
+import { Navigate, useLocation } from 'react-router-dom';
 import { message, Spin } from 'antd';
-import { authService } from '../services/authService';
+import { useAuth } from '../../context/AuthContext'; // Import useAuth
 
 /**
  * 值班主任路由组件
- * 仅允许值班主任访问
+ * 仅允许值班主任访问 (Note: Original logic was only Shift Supervisor, not higher roles)
+ * If higher roles should also access, the condition `user?.role === '值班主任'` needs adjustment.
+ * For now, sticking to the original "仅允许值班主任访问".
  */
 const ShiftSupervisorRoute = ({ children }) => {
-  const [loading, setLoading] = useState(true);
-  const [hasAccess, setHasAccess] = useState(false);
-  const [error, setError] = useState(null);
+  const { user, isAuthenticated, isLoading } = useAuth();
+  const location = useLocation();
 
-  useEffect(() => {
-    const checkAccess = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        
-        // 仅检查是否为值班主任
-        const hasShiftSupervisorAccess = await authService.isShiftSupervisor();
-        
-        // 只允许值班主任访问
-        const hasPermission = hasShiftSupervisorAccess;
-        setHasAccess(hasPermission);
-        
-        if (!hasPermission) {
-          setError('仅限值班主任访问');
-        }
-      } catch (error) {
-        console.error('检查值班主任权限失败:', error);
-        setHasAccess(false);
-        setError(error.message || '检查权限失败');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    checkAccess();
-  }, []);
-
-  if (loading) {
+  if (isLoading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
         <Spin size="large" tip="验证权限中..." />
@@ -48,9 +21,17 @@ const ShiftSupervisorRoute = ({ children }) => {
     );
   }
 
-  if (error || !hasAccess) {
-    console.log('ShiftSupervisorRoute - 权限不足，重定向到首页');
-    message.error('此页面仅限值班主任访问');
+  if (!isAuthenticated) {
+    message.warning('请先登录再访问此页面。');
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  // Original logic was only for '值班主任'.
+  // If routes protected by this should also be accessible by managers/admins,
+  // this condition needs to include them, e.g. const allowedRoles = ['值班主任', '部门经理', ...];
+  if (user?.role !== '值班主任') { 
+    console.log(`ShiftSupervisorRoute - 权限不足 (用户角色: ${user?.role})，重定向到首页`);
+    message.error('此页面仅限值班主任访问。');
     return <Navigate to="/" replace />;
   }
 

@@ -2,12 +2,20 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
 
 // 添加环境变量检查和默认值设置
-const JWT_SECRET = process.env.JWT_SECRET || 'your_development_secret_key';
+// const JWT_SECRET = process.env.JWT_SECRET || 'your_development_secret_key'; // Default will be removed
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/suggestion-system';
 
 // 设置环境变量
-process.env.JWT_SECRET = JWT_SECRET;
+// process.env.JWT_SECRET = JWT_SECRET; // Will be checked directly
 process.env.MONGO_URI = MONGO_URI;
+
+// Startup check for JWT_SECRET
+if (!process.env.JWT_SECRET || process.env.JWT_SECRET.trim() === "") {
+  console.error("FATAL ERROR: JWT_SECRET is not defined in the environment variables.");
+  console.error("The application requires JWT_SECRET to be set for secure token generation.");
+  console.error("Please set it in your .env file or as an environment variable.");
+  process.exit(1); // Terminate the application
+}
 
 // 添加更详细的调试日志
 console.log('环境变量检查:');
